@@ -189,6 +189,11 @@ async def start_clone_bot(FwdBot, data=None):
                     else:
                         return
 
+                # CRITICAL: get_messages does NOT guarantee return order matches
+                # the requested ID order. Telegram may return them differently.
+                # Sort strictly ascending by message ID before yielding.
+                valid_messages.sort(key=lambda m: m.id)
+
                 for message in valid_messages:
                     yield message
 
