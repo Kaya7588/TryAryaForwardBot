@@ -46,7 +46,30 @@ def __parse_link(link: str):
         chat_id = parts[-2]
     return chat_id, msg_id
 
-async def _safe_delete(client, chat_id, ids: list) -> int:
+def _type_matches(msg, wanted: str) -> bool:
+    if msg.empty or msg.service:
+        return False
+    if wanted == "all":
+        return True
+    if wanted == "all_media":
+        return bool(msg.media)
+    if wanted == "commands":
+        return bool(msg.text and msg.text.startswith("/"))
+    mapping = {
+        "audio":     lambda m: bool(m.audio),
+        "voice":     lambda m: bool(m.voice),
+        "video":     lambda m: bool(m.video),
+        "document":  lambda m: bool(m.document),
+        "photo":     lambda m: bool(m.photo),
+        "animation": lambda m: bool(m.animation),
+        "sticker":   lambda m: bool(m.sticker),
+        "text":      lambda m: bool(m.text and not m.media),
+    }
+    check = mapping.get(wanted)
+    return check(msg) if check else False
+
+
+async def _safe_delete(client, chat_id: int, ids: list) -> int:
     if not ids:
         return 0
     try:
@@ -64,13 +87,14 @@ async def _safe_delete(client, chat_id, ids: list) -> int:
     except Exception:
         return 0
 
-async def _do_delete_range(client, chat_id, start_id: int, end_id: int, status_msg) -> int:
+
+async def _do_delete(client, chat_id, wanted: str, status_msg, is_bot: bool, check_range=None) -> int:
+    """
+    Find and delete messages of the given type in chat_id.
+    Returns total deleted count.
+    """
     total = [0]
     batch = []
-    
-    mn = min(start_id, end_id)
-    mx = max(start_id, end_id)
-    all_ids = list(range(mn, mx + 1))
 
     async def flush():
         nonlocal batch
@@ -84,11 +108,78 @@ async def _do_delete_range(client, chat_id, start_id: int, end_id: int, status_m
             except Exception:
                 pass
 
-    for i in all_ids:
-        batch.append(i)
-        if len(batch) >= 100:
-            await flush()
-            
+    if check_range:
+        start_id = min(check_range[0], check_range[1])
+        end_id = max(check_range[0], check_range[1])
+        all_ids = list(range(start_id, end_id + 1))
+        
+        for i in range(0, len(all_ids), 200):
+            chunk = all_ids[i:i+200]
+            try:
+                msgs = await client.get_messages(chat_id, chunk)
+                if not isinstance(msgs, list): msgs = [msgs]
+                valid = [m for m in msgs if m and not m.empty and not m.service]
+                for msg in valid:
+                    if _type_matches(msg, wanted):
+                        batch.append(msg.id)
+                        if len(batch) >= 100:
+                            await flush()
+            except FloodWait as fw:
+                await asyncio.sleep(fw.value + 2)
+            except Exception:
+                pass
+        await flush()
+        return total[0]
+
+    if not is_bot:
+        # USERBOT path: get_chat_history works here
+        try:
+            async for msg in client.get_chat_history(chat_id, limit=0):
+                if _type_matches(msg, wanted):
+                    batch.append(msg.id)
+                    if len(batch) >= 100:
+                        await flush()
+        except Exception as e:
+            print(f"[CleanMSG] get_chat_history error for {chat_id}: {e}")
+    else:
+        # BOT path: iterate by message IDs
+        BATCH = 200
+        current = 1
+        consecutive_empty = 0
+        MAX_EMPTY_RUNS = 5
+
+        while True:
+            ids_to_fetch = list(range(current, current + BATCH))
+            try:
+                msgs = await client.get_messages(chat_id, ids_to_fetch)
+            except FloodWait as fw:
+                await asyncio.sleep(fw.value + 2)
+                continue
+            except Exception as e:
+                print(f"[CleanMSG] get_messages error: {e}")
+                break
+
+            if not isinstance(msgs, list):
+                msgs = [msgs]
+
+            valid = [m for m in msgs if m and not m.empty and not m.service]
+
+            if not valid:
+                consecutive_empty += 1
+                if consecutive_empty >= MAX_EMPTY_RUNS:
+                    break
+                current += BATCH
+                continue
+
+            consecutive_empty = 0
+            for msg in valid:
+                if _type_matches(msg, wanted):
+                    batch.append(msg.id)
+                    if len(batch) >= 100:
+                        await flush()
+
+            current += BATCH
+
     await flush()
     return total[0]
 
@@ -148,34 +239,170 @@ async def _cleanmsg_flow(bot, user_id: int):
     if not sel_acc:
         sel_acc = accounts[0]
 
-    # ── Step 2: First target link ─────────────────
-    msg_reply = await bot.ask(
-        user_id,
-        "<b>🗑 Clean MSG — Step 2/3</b>\n\nSend the <b>FIRST message link</b> (from where deletion should start):",
-        reply_markup=ReplyKeyboardRemove()
-    )
-    if "/cancel" in msg_reply.text:
-       return await msg_reply.reply("<b>Cancelled.</b>", reply_markup=ReplyKeyboardRemove())
-       
-    chat_id, start_id = __parse_link(msg_reply.text)
-    if not chat_id:
-        return await bot.send_message(user_id, "<b>❌ Invalid Telegram Message Link. Cancelled.</b>")
+    # ── Step 2: Choose target chat(s) — multi-select loop ─────────────────
+    channels = await db.get_user_channels(user_id)
+    if not channels:
+        return await bot.send_message(
+            user_id,
+            "<b>❌ No target channels found. Add channels via /settings → Channels.</b>",
+            reply_markup=ReplyKeyboardRemove()
+        )
 
-    # ── Step 3: Last target link ────────────────────────────────────────
-    msg_reply2 = await bot.ask(
-        user_id,
-        "<b>🗑 Clean MSG — Step 3/3</b>\n\nSend the <b>LAST message link</b> (till where deletion should happen):"
-    )
-    if "/cancel" in (msg_reply2.text or ""):
-        return await msg_reply2.reply("<b>Cancelled.</b>", reply_markup=ReplyKeyboardRemove())
+    selected_chats: list[int] = []
+    sel_names: list[str]      = []
+    id_map = {ch['title']: ch['chat_id'] for ch in channels}
 
-    chat_id2, end_id = __parse_link(msg_reply2.text)
-    if not chat_id2 or str(chat_id) != str(chat_id2):
-        return await bot.send_message(user_id, "<b>❌ Invalid link or chats do not match. Cancelled.</b>")
+    while True:
+        # Build current keyboard showing ✅ already selected chats
+        ch_btns = []
+        for ch in channels:
+            tick = "✅ " if ch['chat_id'] in selected_chats else "⬜ "
+            ch_btns.append([KeyboardButton(f"{tick}{ch['title']}")])
+        ch_btns.append([KeyboardButton("✔ All / Clear All")])
+        ch_btns.append([KeyboardButton("▶ Done"), KeyboardButton("/cancel")])
+
+        hint = (
+            f"\n\n<b>Selected ({len(selected_chats)}):</b> " +
+            (", ".join(sel_names[:3]) + ("…" if len(sel_names) > 3 else "") if sel_names else "none")
+        )
+        ch_reply = await bot.ask(
+            user_id,
+            "<b>🗑 Step 2/3</b> — Select chats to clean.\n"
+            "Tap a chat to toggle, or <b>send a Chat ID/Link to add it manually.</b>\n"
+            "Tap <b>▶ Done</b> when finished." + hint,
+            reply_markup=ReplyKeyboardMarkup(ch_btns, resize_keyboard=True, one_time_keyboard=True)
+        )
+        txt = ch_reply.text.strip()
+
+        if "/cancel" in txt:
+            return await ch_reply.reply("<b>Cancelled.</b>", reply_markup=ReplyKeyboardRemove())
+
+        if "Done" in txt or "▶" in txt:
+            break
+
+        if "All / Clear All" in txt or "✔" in txt:
+            if len(selected_chats) == len(channels):
+                selected_chats.clear()
+                sel_names.clear()
+            else:
+                selected_chats = [ch['chat_id'] for ch in channels]
+                sel_names      = [ch['title']   for ch in channels]
+            continue
+
+        # Toggle individual
+        clean_txt = txt.replace("✅ ", "").replace("⬜ ", "").strip()
+        found = False
+        for title, cid in id_map.items():
+            if title in clean_txt or clean_txt in title:
+                found = True
+                if cid in selected_chats:
+                    selected_chats.remove(cid)
+                    sel_names.remove(title)
+                else:
+                    selected_chats.append(cid)
+                    sel_names.append(title)
+                break
+                
+        if not found:
+            custom_id = None
+            if clean_txt.startswith("-100") and clean_txt[1:].isdigit():
+                custom_id = int(clean_txt)
+            elif clean_txt.isdigit() or (clean_txt.startswith("-") and clean_txt[1:].isdigit()):
+                custom_id = int(clean_txt)
+            elif "t.me/c/" in clean_txt:
+                parts = clean_txt.split("t.me/c/")[1].split("/")
+                if parts[0].isdigit():
+                    custom_id = int(f"-100{parts[0]}")
+            elif "t.me/" in clean_txt:
+                username = clean_txt.split("t.me/")[1].split("/")[0].split("?")[0]
+                custom_id = username
+            
+            if custom_id:
+                if custom_id in selected_chats:
+                    selected_chats.remove(custom_id)
+                    sel_names.remove(str(custom_id))
+                else:
+                    selected_chats.append(custom_id)
+                    sel_names.append(str(custom_id))
+
+    if not selected_chats:
+        return await bot.send_message(
+            user_id, "<b>❌ No chats selected. Cancelled.</b>",
+            reply_markup=ReplyKeyboardRemove()
+        )
+
+    # ── Step 3: Choose message type ────────────────────────────────────────
+    type_reply = await bot.ask(
+        user_id,
+        "<b>🗑 Step 3/4</b> — What type of messages to delete?",
+        reply_markup=ReplyKeyboardMarkup([
+            [KeyboardButton("🗂 All Messages"),   KeyboardButton("🎵 Audio")],
+            [KeyboardButton("🎤 Voice"),          KeyboardButton("📹 Video")],
+            [KeyboardButton("📄 Document"),       KeyboardButton("🖼 Photo")],
+            [KeyboardButton("🎞 Animation"),      KeyboardButton("🖍 Text Only")],
+            [KeyboardButton("📦 All Media"),      KeyboardButton("🤖 Commands")],
+            [KeyboardButton("/cancel")],
+        ], resize_keyboard=True, one_time_keyboard=True)
+    )
+    if "/cancel" in (type_reply.text or ""):
+        return await type_reply.reply("<b>Cancelled.</b>", reply_markup=ReplyKeyboardRemove())
+
+    type_map = {
+        "All Messages": "all",    "All Media": "all_media",
+        "Audio": "audio",         "Voice":     "voice",
+        "Video": "video",         "Document":  "document",
+        "Photo": "photo",         "Animation": "animation",
+        "Text Only": "text",      "Commands": "commands",
+    }
+    wanted = "all"
+    for label, key in type_map.items():
+        if label in (type_reply.text or ""):
+            wanted = key
+            break
+
+    # ── Step 4: Choose Range ────────────────────────────────────────
+    range_reply = await bot.ask(
+        user_id,
+        "<b>🗑 Step 4/4</b> — Process the <b>Entire Chat(s)</b>, or define a <b>Custom Link Range</b>?",
+        reply_markup=ReplyKeyboardMarkup([
+            [KeyboardButton("🌍 Entire Chat(s)")],
+            [KeyboardButton("🔗 Custom Link Range (From-To)")],
+            [KeyboardButton("/cancel")]
+        ], resize_keyboard=True, one_time_keyboard=True)
+    )
+    if "/cancel" in (range_reply.text or ""):
+        return await range_reply.reply("<b>Cancelled.</b>", reply_markup=ReplyKeyboardRemove())
+        
+    check_range = None
+    if "Custom Link Range" in (range_reply.text or ""):
+        msg_reply1 = await bot.ask(
+            user_id,
+            "Send the <b>FIRST message link</b> (from where deletion should start):",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        if "/cancel" in msg_reply1.text: return await msg_reply1.reply("<b>Cancelled.</b>", reply_markup=ReplyKeyboardRemove())
+        chat_id_from, start_id = __parse_link(msg_reply1.text)
+        
+        msg_reply2 = await bot.ask(
+            user_id,
+            "Send the <b>LAST message link</b> (till where deletion should happen):"
+        )
+        if "/cancel" in msg_reply2.text: return await msg_reply2.reply("<b>Cancelled.</b>", reply_markup=ReplyKeyboardRemove())
+        chat_id_to, end_id = __parse_link(msg_reply2.text)
+        
+        if not chat_id_from or str(chat_id_from) != str(chat_id_to):
+            return await bot.send_message(user_id, "<b>❌ Invalid link or chats do not match. Cancelled.</b>")
+            
+        selected_chats = [chat_id_from]
+        sel_names = [str(chat_id_from)]
+        check_range = (start_id, end_id)
 
     # ── Confirm ─────────────────────────────────────────────────────────────
     acc_label = "🤖 Bot" if sel_acc.get('is_bot', True) else "👤 Userbot"
     acc_name  = sel_acc.get('name', 'Unknown')
+    chat_list = "\n".join(f"  • {n}" for n in sel_names)
+    type_label = type_reply.text.strip()
+    range_label = f"From ID <code>{start_id}</code> to <code>{end_id}</code>" if check_range else "Entire Chat(s)"
 
     confirm_markup = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Yes, Delete!", callback_data="cleanmsg#confirm"),
@@ -185,20 +412,24 @@ async def _cleanmsg_flow(bot, user_id: int):
         user_id,
         f"<b>⚠️ Confirm Deletion</b>\n\n"
         f"<b>Account:</b> {acc_label} — {acc_name}\n"
-        f"<b>Chat ID:</b> <code>{chat_id}</code>\n"
-        f"<b>Messages:</b> From ID <code>{start_id}</code> to <code>{end_id}</code>\n\n"
+        f"<b>Delete type:</b> {type_label}\n"
+        f"<b>Range:</b> {range_label}\n"
+        f"<b>Chats:</b>\n{chat_list}\n\n"
         f"<i>⚠️ This action is irreversible. Continue?</i>",
         reply_markup=confirm_markup
     )
-    await msg_reply2.reply("<b>Confirm above ⬆️</b>", reply_markup=ReplyKeyboardRemove())
+    if "Custom Link Range" not in (range_reply.text or ""):
+        await range_reply.reply("<b>Confirm above ⬆️</b>", reply_markup=ReplyKeyboardRemove())
+    else:
+        await msg_reply2.reply("<b>Confirm above ⬆️</b>", reply_markup=ReplyKeyboardRemove())
 
     # Store context
     _pending_cleans[confirm_msg.id] = {
         "user_id": user_id,
         "account": sel_acc,
-        "chat_id": chat_id,
-        "start_id": start_id,
-        "end_id": end_id
+        "chats":   selected_chats,
+        "wanted":  wanted,
+        "check_range": check_range
     }
 
 
@@ -212,9 +443,8 @@ async def cleanmsg_confirm(bot, query):
         return await query.answer("Session expired. Run /cleanmsg again.", show_alert=True)
 
     sel_acc       = ctx["account"]
-    chat_id       = ctx["chat_id"]
-    start_id      = ctx["start_id"]
-    end_id        = ctx["end_id"]
+    selected_chats= ctx["chats"]
+    wanted        = ctx["wanted"]
     user_id       = ctx["user_id"]
 
     status_msg = await query.message.edit_text("<b>🗑 Starting Clean MSG… please wait.</b>")
@@ -225,17 +455,22 @@ async def cleanmsg_confirm(bot, query):
     except Exception as e:
         return await status_msg.edit_text(f"<b>❌ Could not start account:</b>\n<code>{e}</code>")
 
+    me     = await client.get_me()
+    is_bot = getattr(me, 'is_bot', False)
+
     grand_total  = 0
     failed_chats = []
 
-    try:
-        await status_msg.edit_text(
-            f"<b>🗑 Cleaning…\n✅ Deleted so far: <code>{grand_total}</code></b>"
-        )
-        grand_total = await _do_delete_range(client, chat_id, start_id, end_id, status_msg)
-    except Exception as e:
-        print(f"[CleanMSG] Chat {chat_id} error: {e}")
-        failed_chats.append(str(chat_id))
+    for chat_id in selected_chats:
+        try:
+            await status_msg.edit_text(
+                f"<b>🗑 Cleaning…\n✅ Deleted so far: <code>{grand_total}</code></b>"
+            )
+            count = await _do_delete(client, chat_id, wanted, status_msg, is_bot, ctx.get("check_range"))
+            grand_total += count
+        except Exception as e:
+            print(f"[CleanMSG] Chat {chat_id} error: {e}")
+            failed_chats.append(str(chat_id))
 
     try:
         await client.stop()
