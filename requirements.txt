@@ -4,7 +4,6 @@ TgCrypto
 Dnspython
 cryptg
 tgcrypto
-Pyrogram==2.0.93
 psutil
 opencv-python-headless
 python-decouple

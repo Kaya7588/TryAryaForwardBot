@@ -72,7 +72,7 @@ async def web_server():
                 <p>Status: <span class="status-active">Active</span></p>
                 <p>Uptime: {uptime}</p>
                 <div class="footer">
-                    Powered by Auto Forward Bot V2
+                    Powered by Aryᴀ Bᴏᴛ
                 </div>
             </div>
         </body>

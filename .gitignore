@@ -1,0 +1,33 @@
+# Environment / credentials
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+venv/
+env/
+
+# Pyrogram sessions
+*.session
+*.session-journal
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp / scratch files
+__tmp_*.py
+
+# Downloaded media (runtime folder, can be huge)
+downloads/

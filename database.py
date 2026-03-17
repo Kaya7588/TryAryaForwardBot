@@ -87,6 +87,7 @@ class Database:
         default = {
             'caption': None,
             'duplicate': True,
+            'download': False,
             'forward_tag': False,
             'file_size': 0,
             'size_limit': None,
@@ -95,6 +96,7 @@ class Database:
             'protect': None,
             'button': None,
             'db_uri': None,
+            'duration': 0,
             'filters': {
                'poll': True,
                'text': True,
@@ -104,24 +106,78 @@ class Database:
                'photo': True,
                'document': True,
                'animation': True,
-               'sticker': True
+               'sticker': True,
+               'rm_caption': False
             }
         }
         user = await self.col.find_one({'id':int(id)})
         if user:
-            return user.get('configs', default)
+            user_configs = user.get('configs', {})
+            # Merge with default to ensure new fields are populated
+            merged = default.copy()
+            merged.update(user_configs)
+            if 'filters' in user_configs:
+                merged_filters = default['filters'].copy()
+                merged_filters.update(user_configs['filters'])
+                merged['filters'] = merged_filters
+            return merged
         return default 
        
     async def add_bot(self, datas):
-       if not await self.is_bot_exist(datas['user_id']):
-          await self.bot.insert_one(datas)
+       is_bot = datas.get('is_bot', True)
+       count = await self.bot.count_documents({'user_id': datas['user_id'], 'is_bot': is_bot})
+       if count >= 2: return "LIMIT_REACHED"
+       exists = await self.bot.find_one({'user_id': datas['user_id'], 'id': datas['id']})
+       if exists: return "EXISTS"
+       
+       total = await self.bot.count_documents({'user_id': datas['user_id']})
+       datas['active'] = True if total == 0 else False
+       await self.bot.insert_one(datas)
+       return True
     
-    async def remove_bot(self, user_id):
-       await self.bot.delete_many({'user_id': int(user_id)})
+    async def remove_bot(self, user_id, bot_id=None):
+       if bot_id:
+           await self.bot.delete_one({'user_id': int(user_id), 'id': int(bot_id)})
+       else:
+           await self.bot.delete_many({'user_id': int(user_id)})
       
-    async def get_bot(self, user_id: int):
-       bot = await self.bot.find_one({'user_id': user_id})
-       return bot if bot else None
+    async def get_bot(self, user_id: int, bot_id=None):
+       query = {'user_id': user_id}
+       if bot_id: query['id'] = int(bot_id)
+       bots = self.bot.find(query)
+       bots_list = [b async for b in bots]
+       if not bots_list: return None
+       if bot_id: return bots_list[0]
+       
+       for b in bots_list:
+           if b.get('active'): return b
+       return bots_list[0]
+                                          
+    async def get_bots(self, user_id: int):
+       bots = self.bot.find({'user_id': user_id})
+       return [b async for b in bots]
+       
+    async def set_active_bot(self, user_id: int, bot_id: int):
+        # Only deactivate accounts of the same type (bot or userbot), not all
+        target = await self.bot.find_one({'user_id': user_id, 'id': int(bot_id)})
+        if not target: return
+        is_bot = target.get('is_bot', True)
+        await self.bot.update_many({'user_id': user_id, 'is_bot': is_bot}, {'$set': {'active': False}})
+        await self.bot.update_one({'user_id': user_id, 'id': int(bot_id)}, {'$set': {'active': True}})
+     
+    async def get_active_bot(self, user_id: int):
+        """Get the active normal bot for this user."""
+        bots = [b async for b in self.bot.find({'user_id': user_id, 'is_bot': True})]
+        for b in bots:
+            if b.get('active'): return b
+        return bots[0] if bots else None
+
+    async def get_active_userbot(self, user_id: int):
+        """Get the active userbot for this user."""
+        ubots = [b async for b in self.bot.find({'user_id': user_id, 'is_bot': False})]
+        for b in ubots:
+            if b.get('active'): return b
+        return ubots[0] if ubots else None
                                           
     async def is_bot_exist(self, user_id):
        bot = await self.bot.find_one({'user_id': user_id})
@@ -167,5 +223,25 @@ class Database:
     
     async def get_all_frwd(self):
        return self.nfy.find({})
-     
+    async def get_language(self, user_id: int) -> str:
+        """Return user's preferred language: 'en', 'hi', or 'hinglish'. Default 'en'."""
+        user = await self.col.find_one({'id': int(user_id)})
+        if user:
+            return user.get('language', 'en')
+        return 'en'
+
+    async def set_language(self, user_id: int, lang: str):
+        await self.col.update_one({'id': int(user_id)}, {'$set': {'language': lang}}, upsert=True)
+
+    async def get_total_users_count(self) -> int:
+        return await self.col.count_documents({})
+
+    async def get_active_forwardings_count(self) -> int:
+        """Count users who are currently running a forwarding task."""
+        return await self.nfy.count_documents({})
+
+    async def get_active_jobs_count(self) -> int:
+        """Count running Live Jobs."""
+        return await self.db.jobs.count_documents({'status': 'running'})
+
 db = Database(Config.DATABASE_URI, Config.DATABASE_NAME)

@@ -33,81 +33,163 @@ async def start_clone_bot(FwdBot, data=None):
       offset: int = 0,
       search: str = None,
       filter: "types.TypeMessagesFilter" = None,
-      continuous: bool = False
+      continuous: bool = False,
+      reverse_order: bool = False
       ) -> Optional[AsyncGenerator["types.Message", None]]:
-        """Iterate through a chat sequentially."""
-        current = offset
-        while True:
-            # If continuous, we don't really have a limit, effectively infinite
-            # But we still use limit if provided to fetch batches
-            # If continuous=True, loop forever waiting for new messages
+        """Iterate through a chat sequentially. Bot-safe implementation."""
+        import pyrogram
+        
+        # Detect if this client is a normal bot — bots CANNOT use get_chat_history (user-only API).
+        me = await self.get_me()
+        is_bot = getattr(me, 'is_bot', False)
+        
+        chat = await self.get_chat(chat_id)
+        is_channel_or_supergroup = chat.type in [
+            pyrogram.enums.ChatType.CHANNEL,
+            pyrogram.enums.ChatType.SUPERGROUP,
+        ]
 
-            # If batch fetch size is 200
-            new_diff = 200 # Default batch size
+        BATCH_SIZE = 200  # Max IDs per get_messages call
 
-            if not continuous and limit > 0:
-                new_diff = min(200, limit - current)
-                if new_diff <= 0:
-                    return
-
-            try:
-                messages = await self.get_messages(chat_id, list(range(current, current+new_diff+1)))
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                continue
-            except Exception:
-                # If message doesn't exist (yet), get_messages returns None or list with None?
-                # Pyrogram get_messages with list returns list of Messages or None
-                messages = []
-
-            # Filter out None values (messages that don't exist yet)
-            valid_messages = [m for m in messages if m and not m.empty]
-
-            if not valid_messages:
-                if continuous:
-                    # No new messages, wait and retry
-                    await asyncio.sleep(10)
-                    continue
-                else:
-                    # End of chat
-                    return
-
-            for message in valid_messages:
+        # ── USERBOT PATH ─────────────────────────────────────────────────────────
+        # Userbots can freely use get_chat_history for any chat type.
+        if not is_bot:
+            messages = []
+            fetch_limit = limit if limit > 0 else 0
+            async for msg in self.get_chat_history(chat_id, limit=fetch_limit):
+                if msg and not msg.empty:
+                    messages.append(msg)
+            if not reverse_order:
+                messages.reverse()          # flip New→Old into Old→New
+            if offset > 0:
+                messages = messages[offset:]
+            for message in messages:
                 yield message
-                current = max(current, message.id) + 1
+            if continuous:
+                last_id = messages[-1].id if messages else 0
+                while True:
+                    await asyncio.sleep(5)
+                    new_msgs = []
+                    async for msg in self.get_chat_history(chat_id, limit=200):
+                        if msg.id <= last_id:
+                            break
+                        if msg and not msg.empty:
+                            new_msgs.append(msg)
+                    if new_msgs:
+                        if not reverse_order:
+                            new_msgs.reverse()
+                        for msg in new_msgs:
+                            yield msg
+                        last_id = new_msgs[-1].id if not reverse_order else new_msgs[0].id
+            return
 
-            # If we got fewer messages than requested, and not continuous, it might be end?
-            # But we are iterating by ID range, so gaps are possible.
-            # We just increment current.
-            if not valid_messages and not continuous:
-                 return
+        # ── BOT PATH ──────────────────────────────────────────────────────────────
+        # Normal bots cannot call get_chat_history.
+        # For channels/supergroups: message IDs are sequential and we can fetch by ID list.
+        # For other chat types (groups, DMs): get_messages by ID also works.
 
-            # Optimization: if valid_messages is empty but we are in continuous mode, we handled it above.
-            # If valid_messages is NOT empty, we processed them.
-            # Update current to be next ID.
+        if reverse_order:
+            # ── New to Old: binary-search for the actual top message ID ──────────
+            # Starting from 9999999 and walking down causes ~50,000 API calls for
+            # small channels. Binary search finds top_id in ≤23 calls.
+            lo, hi = 1, 9_999_999
+            for _ in range(25):  # log2(9_999_999) ≈ 23
+                if hi - lo <= BATCH_SIZE:
+                    break
+                mid = (lo + hi) // 2
+                try:
+                    probe = await self.get_messages(chat_id, [mid])
+                    if not isinstance(probe, list): probe = [probe]
+                    if any(m and not m.empty for m in probe):
+                        lo = mid   # message exists here → go higher
+                    else:
+                        hi = mid   # no message here  → go lower
+                except Exception:
+                    hi = mid       # on error, assume nothing there
 
-            current = list(range(current, current+new_diff+1))[-1] + 1
-            # Wait, the range logic above: range(current, current+new_diff+1)
-            # If current=0, new_diff=200. range(0, 201). IDs 0..200.
-            # Next iteration should start at 201.
-            # So current += new_diff + 1?
-            # No, if we yield, we just continue loop.
-            # But we need to update 'current' for next batch.
-            # My previous logic: `current += 1` inside loop was weird because `messages` is a batch.
+            top_id = hi
+            current = top_id
+            fetched = 0
 
-            # Let's fix the batch logic properly
-            # The original code:
-            # messages = await self.get_messages(chat_id, list(range(current, current+new_diff+1)))
-            # for message in messages: yield message; current += 1
-            # This assumed sequential IDs and incrementing current.
+            while True:
+                if limit > 0 and fetched >= limit:
+                    return
 
-            # New logic:
-            # Just increment current by batch size at the end of loop
-            current += (new_diff + 1)
+                batch_start = max(1, current - BATCH_SIZE + 1)
+                batch_end   = current
+                if batch_start > batch_end:
+                    return
 
+                batch_ids = list(range(batch_start, batch_end + 1))
+                batch_ids.reverse()  # high → low
+
+                try:
+                    msgs = await self.get_messages(chat_id, batch_ids)
+                except FloodWait as e:
+                    await asyncio.sleep(e.value)
+                    continue
+                except Exception:
+                    return
+
+                if not isinstance(msgs, list):
+                    msgs = [msgs]
+
+                valid = [m for m in msgs if m and not m.empty]
+                valid.sort(key=lambda m: m.id, reverse=True)  # New → Old
+
+                for message in valid:
+                    if limit > 0 and fetched >= limit:
+                        return
+                    yield message
+                    fetched += 1
+
+                current = batch_start - 1
+                if current < 1:
+                    return
+
+
+        else:
+            # ── Old to New: walk IDs from low to high ──
+            current = max(1, offset if offset > 0 else 1)
+
+            while True:
+                new_diff = BATCH_SIZE
+                if not continuous and limit > 0:
+                    remaining = limit - (current - 1)
+                    new_diff = min(BATCH_SIZE, remaining)
+                    if new_diff <= 0:
+                        return
+
+                batch_ids = list(range(current, current + new_diff))
+
+                try:
+                    messages = await self.get_messages(chat_id, batch_ids)
+                except FloodWait as e:
+                    await asyncio.sleep(e.value)
+                    continue
+                except Exception:
+                    messages = []
+
+                if not isinstance(messages, list):
+                    messages = [messages]
+
+                valid_messages = [m for m in messages if m and not m.empty]
+
+                if not valid_messages:
+                    if continuous:
+                        await asyncio.sleep(5)
+                        continue
+                    else:
+                        return
+
+                for message in valid_messages:
+                    yield message
+
+                current = batch_ids[-1] + 1
    #
    FwdBot.iter_messages = iter_messages
    return FwdBot
+
 
 class CLIENT: 
   def __init__(self):
@@ -149,33 +231,59 @@ class CLIENT:
        'token': bot_token,
        'username': _bot.username 
      }
-     await db.add_bot(details)
-     return True
+     res = await db.add_bot(details)
+     return res
     
   async def add_session(self, bot, message):
      user_id = int(message.from_user.id)
-     text = "<b>⚠️ DISCLAIMER ⚠️</b>\n\n<code>you can use your session for forward message from private chat to another chat.\nPlease add your pyrogram session with your own risk. Their is a chance to ban your account. My developer is not responsible if your account may get banned.</code>"
+     text = "<b>⚠️ DISCLAIMER ⚠️</b>\n\n<code>You can use your userbot account for forwarding messages from private chats or restricted channels.\nPlease sign in with your phone number at your own risk. There is a chance your account may get banned. My developer is not responsible if your account gets banned.</code>"
      await bot.send_message(user_id, text=text)
-     msg = await bot.ask(chat_id=user_id, text="<b>send your pyrogram session.\nGet it from trusted sources.\n\n/cancel - cancel the process</b>")
-     if msg.text=='/cancel':
+     msg = await bot.ask(chat_id=user_id, text="<b>Send your phone number with country code (e.g. +1234567890).\n\n/cancel - cancel the process</b>")
+     if msg.text == '/cancel':
         return await msg.reply('<b>process cancelled !</b>')
-     elif len(msg.text) < SESSION_STRING_SIZE:
-        return await msg.reply('<b>invalid session sring</b>')
+     phone_number = msg.text.strip()
+     import pyrogram
+     temp_client = Client("temp_session", in_memory=True, api_id=int(self.api_id), api_hash=self.api_hash)
      try:
-       client = await start_clone_bot(self.client(msg.text, True), True)
+        await temp_client.connect()
+        code = await temp_client.send_code(phone_number)
+        otp_msg = await bot.ask(chat_id=user_id, text="<b>Send the OTP you received (e.g. 1 2 3 4 5 if code is 12345).\n\n/cancel - cancel the process</b>")
+        if otp_msg.text == '/cancel':
+           await temp_client.disconnect()
+           return await bot.send_message(user_id, '<b>process cancelled !</b>')
+        
+        otp = otp_msg.text.replace(" ", "")
+        try:
+           await temp_client.sign_in(phone_number, code.phone_code_hash, otp)
+        except pyrogram.errors.SessionPasswordNeeded:
+           pwd_msg = await bot.ask(chat_id=user_id, text="<b>Your account has 2FA enabled. Send your password.\n\n/cancel - cancel the process</b>")
+           if pwd_msg.text == '/cancel':
+              await temp_client.disconnect()
+              return await bot.send_message(user_id, '<b>process cancelled !</b>')
+           await temp_client.check_password(pwd_msg.text)
+        
+        session_string = await temp_client.export_session_string()
+        await temp_client.disconnect()
+        
+        client = await start_clone_bot(self.client(session_string, True), True)
+        user = client.me
+        details = {
+          'id': user.id,
+          'is_bot': False,
+          'user_id': user_id,
+          'name': user.first_name,
+          'session': session_string,
+          'username': user.username
+        }
+        res = await db.add_bot(details)
+        return res
      except Exception as e:
-       await msg.reply_text(f"<b>USER BOT ERROR:</b> `{e}`")
-     user = client.me
-     details = {
-       'id': user.id,
-       'is_bot': False,
-       'user_id': user_id,
-       'name': user.first_name,
-       'session': msg.text,
-       'username': user.username
-     }
-     await db.add_bot(details)
-     return True
+        try:
+            await temp_client.disconnect()
+        except:
+            pass
+        await bot.send_message(user_id, f"<b>USER BOT ERROR:</b> `{e}`")
+        return False
     
 @Client.on_message(filters.private & filters.command('reset'))
 async def forward_tag(bot, m):
@@ -217,7 +325,7 @@ async def get_configs(user_id):
                           
 async def update_configs(user_id, key, value):
   current = await db.get_configs(user_id)
-  if key in ['caption', 'duplicate', 'db_uri', 'forward_tag', 'protect', 'file_size', 'size_limit', 'extension', 'keywords', 'button']:
+  if key in ['caption', 'duplicate', 'download', 'db_uri', 'duration', 'forward_tag', 'protect', 'file_size', 'size_limit', 'extension', 'keywords', 'button']:
      current[key] = value
   else: 
      current['filters'][key] = value
