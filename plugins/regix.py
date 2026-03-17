@@ -181,6 +181,36 @@ async def pub_(bot, message):
           # ---------------------------------------------------
           
           seq_counter = 0
+          sort_buffer = []
+          
+          async def flush_buffer():
+              nonlocal seq_counter, sort_buffer
+              if not sort_buffer: return
+              
+              # Sort the chunk strictly by message ID to fix source-level mismatches 
+              # (e.g. 1, 3, 2, 5, 4 becomes 1, 2, 3, 4, 5)
+              sort_buffer.sort(key=lambda item: item[0].id)
+              
+              for message, forward_tag, new_caption, protect, download_mode, sleep in sort_buffer:
+                  sts.add('fetched')
+                  if forward_tag:
+                     MSG.append(message.id)
+                     notcompleted = len(MSG)
+                     completed = sts.get('total') - sts.get('fetched')
+                     if ( notcompleted >= 100 
+                          or completed <= 100): 
+                        await forward(client, MSG, m, sts, protect)
+                        sts.add('total_files', notcompleted)
+                        await asyncio.sleep(10)
+                        MSG.clear()
+                  else:
+                      details = {"msg_id": message.id, "media": media(message), "caption": new_caption, 'button': button, "protect": protect, "text": message.text.html if message.text else ""}
+                      await task_queue.put((seq_counter, client, details, m, sts, download_mode, 0))
+                      seq_counter += 1
+                      
+                      if sleep > 0:
+                          await asyncio.sleep(sleep)
+              sort_buffer.clear()
 
           async for message in client.iter_messages(
             client,
@@ -249,39 +279,29 @@ async def pub_(bot, message):
                     sts.add('filtered')
                     continue
 
-                sts.add('fetched')
-                if forward_tag:
-                   MSG.append(message.id)
-                   notcompleted = len(MSG)
-                   completed = sts.get('total') - sts.get('fetched')
-                   if ( notcompleted >= 100 
-                        or completed <= 100): 
-                      await forward(client, MSG, m, sts, protect)
-                      sts.add('total_files', notcompleted)
-                      await asyncio.sleep(10)
-                      MSG = []
-                else:
-                    _filters = data.get('filters', [])
-                    new_caption = custom_caption(message, caption)
-                    if (message.audio or message.video or message.photo or message.document) and 'rm_caption' in _filters:
-                        new_caption = ""
+                # Queue the message into the sorting buffer
+                _filters = data.get('filters', [])
+                new_caption = custom_caption(message, caption)
+                if (message.audio or message.video or message.photo or message.document) and 'rm_caption' in _filters:
+                    new_caption = ""
 
-                    # Apply Replacements
-                    replacements = data.get('replacements', {})
-                    if replacements and new_caption:
-                        for old_txt, new_txt in replacements.items():
-                            try:
-                                new_caption = re.sub(old_txt, new_txt, new_caption, flags=re.IGNORECASE)
-                            except Exception:
-                                new_caption = new_caption.replace(old_txt, new_txt)
+                # Apply Replacements
+                replacements = data.get('replacements', {})
+                if replacements and new_caption:
+                    for old_txt, new_txt in replacements.items():
+                        try:
+                            new_caption = re.sub(old_txt, new_txt, new_caption, flags=re.IGNORECASE)
+                        except Exception:
+                            new_caption = new_caption.replace(old_txt, new_txt)
+                
+                sort_buffer.append((message, forward_tag, new_caption, protect, download_mode, sleep))
+                
+                # Flush buffer dynamically (Wait until we gather 5 items or hit the end)
+                if len(sort_buffer) >= 5 or is_continuous:
+                    await flush_buffer()
                     
-                    details = {"msg_id": message.id, "media": media(message), "caption": new_caption, 'button': button, "protect": protect, "text": message.text.html if message.text else ""}
-                    # Put task in queue instead of waiting for it sequentially
-                    await task_queue.put((seq_counter, client, details, m, sts, download_mode, 0))
-                    seq_counter += 1
-                    
-                    if sleep > 0:
-                        await asyncio.sleep(sleep)
+          # --- Flush anything remaining in buffer ---
+          await flush_buffer()
                     
           # --- Wait for all pending tasks to finish before completing ---
           if not is_continuous:
