@@ -86,28 +86,34 @@ def _passes_filters(msg, disabled_types: list[str]) -> bool:
     return True
 
 
-async def _forward_message(client, msg, to_chat: int, remove_caption: bool):
-    """Try copy_message; fall back to forward_messages for restricted chats."""
+async def _forward_message(client, msg, to_chat: int, remove_caption: bool, thread_id: int = None):
+    """Try copy_message into the specified chat (and optional topic thread).
+    Falls back to forward_messages for restricted/protected chats.
+    """
+    kw_thread = {"message_thread_id": thread_id} if thread_id else {}
     try:
         if remove_caption and msg.media:
             await client.copy_message(
                 chat_id=to_chat,
                 from_chat_id=msg.chat.id,
                 message_id=msg.id,
-                caption=""
+                caption="",
+                **kw_thread
             )
         else:
             await client.copy_message(
                 chat_id=to_chat,
                 from_chat_id=msg.chat.id,
-                message_id=msg.id
+                message_id=msg.id,
+                **kw_thread
             )
     except Exception:
         try:
             await client.forward_messages(
                 chat_id=to_chat,
                 from_chat_id=msg.chat.id,
-                message_ids=msg.id
+                message_ids=msg.id,
+                **kw_thread
             )
         except Exception as e:
             logger.debug(f"[Job forward] Failed: {e}")
@@ -168,6 +174,7 @@ async def _run_job(job_id: str, user_id: int):
 
         from_chat  = job["from_chat"]
         to_chat    = job["to_chat"]
+        to_thread  = job.get("to_thread_id", None)  # Group topic thread ID (None = no topic)
         last_seen  = job.get("last_seen_id", 0)
 
         # ── First-run initialisation: capture latest ID without forwarding ──
@@ -244,7 +251,7 @@ async def _run_job(job_id: str, user_id: int):
                     last_seen = max(last_seen, msg.id)
                     continue
                 try:
-                    await _forward_message(client, msg, to_chat, remove_caption)
+                    await _forward_message(client, msg, to_chat, remove_caption, to_thread)
                     fwd_count += 1
                 except FloodWait as fw:
                     await asyncio.sleep(fw.value + 1)
@@ -389,12 +396,14 @@ async def job_info_cb(bot, query):
     import datetime
     created = datetime.datetime.fromtimestamp(job.get("created", 0)).strftime("%Y-%m-%d %H:%M")
     st = _status_emoji(job.get("status", "stopped"))
+    thread_id = job.get("to_thread_id")
+    topic_lbl = f"\n<b>Topic Thread ID:</b> <code>{thread_id}</code>" if thread_id else ""
     text = (
         f"<b>📋 Job Info</b>\n\n"
         f"<b>ID:</b> <code>{job_id[-6:]}</code>\n"
         f"<b>Status:</b> {st} {job.get('status','?')}\n"
         f"<b>Source:</b> {job.get('from_title','?')}\n"
-        f"<b>Target:</b> {job.get('to_title','?')}\n"
+        f"<b>Target:</b> {job.get('to_title','?')}{topic_lbl}\n"
         f"<b>Forwarded:</b> {job.get('forwarded', 0)}\n"
         f"<b>Last Msg ID:</b> {job.get('last_seen_id', 0)}\n"
         f"<b>Created:</b> {created}\n"
@@ -572,28 +581,50 @@ async def _create_job_flow(bot, user_id: int):
         return await bot.send_message(user_id, "<b>Invalid selection. Cancelled.</b>",
                                       reply_markup=ReplyKeyboardRemove())
 
+    # ── Step 4: Optional Group Topic Thread ─────────────────────────────────
+    topic_r = await bot.ask(user_id,
+        "<b>Step 4/4 — Group Topic (Optional)</b>\n\n"
+        "Is the target a <b>specific topic/thread</b> inside a group?\n\n"
+        "• Send the <b>Thread ID</b> (the message ID of the topic's first message)\n"
+        "• Or send <b>0</b> / <b>skip</b> to post to the main chat (no topic)\n\n"
+        "<i>To find a topic's Thread ID: open the topic in Telegram Web → the number after /topics/ in the URL is the Thread ID.</i>",
+        reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton("0 (No Topic)")], [KeyboardButton("/cancel")]],
+            resize_keyboard=True, one_time_keyboard=True
+        ))
+
+    if "/cancel" in topic_r.text:
+        return await topic_r.reply("<b>Cancelled.</b>", reply_markup=ReplyKeyboardRemove())
+
+    to_thread_id = None
+    t_raw = topic_r.text.strip()
+    if t_raw.isdigit() and int(t_raw) > 0:
+        to_thread_id = int(t_raw)
+
     # ── Save & Start ─────────────────────────────────────────────────────────
     job_id = f"{user_id}-{int(time.time())}"
     job = {
-        "job_id":       job_id,
-        "user_id":      user_id,
-        "account_id":   sel_acc["id"],
-        "from_chat":    from_chat,
-        "from_title":   from_title,
-        "to_chat":      to_chat,
-        "to_title":     to_title,
-        "status":       "running",
-        "created":      int(time.time()),
-        "forwarded":    0,
-        "last_seen_id": 0,   # 0 means "initialise on first poll"
+        "job_id":        job_id,
+        "user_id":       user_id,
+        "account_id":    sel_acc["id"],
+        "from_chat":     from_chat,
+        "from_title":    from_title,
+        "to_chat":       to_chat,
+        "to_title":      to_title,
+        "to_thread_id":  to_thread_id,   # None = main chat, int = topic thread
+        "status":        "running",
+        "created":       int(time.time()),
+        "forwarded":     0,
+        "last_seen_id":  0,
     }
     await _save_job(job)
     _start_job_task(job_id, user_id)
 
+    thread_lbl = f"\n<b>Topic Thread:</b> <code>{to_thread_id}</code>" if to_thread_id else ""
     await bot.send_message(
         user_id,
-        f"<b>✅ Live Job Created &amp; Started!</b>\n\n"
-        f"🟢 Watching <b>{from_title}</b> → <b>{to_title}</b>\n"
+        f"<b>✅ Live Job Created & Started!</b>\n\n"
+        f"🟢 Watching <b>{from_title}</b> → <b>{to_title}</b>{thread_lbl}\n"
         f"<b>Account:</b> {'🤖 Bot' if is_bot else '👤 Userbot'}: "
         f"{sel_acc.get('name','?')}\n"
         f"<b>Filters:</b> respects your /settings → Filters\n"
