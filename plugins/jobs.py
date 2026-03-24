@@ -32,6 +32,35 @@ _CLIENT = CLIENT()
 # In-memory: job_id → asyncio.Task
 _job_tasks: dict[str, asyncio.Task] = {}
 
+# ─── Future-based ask() — immune to pyrofork stale-listener bug ──────────────
+_lj_waiting: dict[int, asyncio.Future] = {}
+
+
+@Client.on_message(filters.private, group=-12)
+async def _lj_input_router(bot, message):
+    """Route private messages to waiting _ask() futures for Live Job flow."""
+    uid = message.from_user.id if message.from_user else None
+    if uid and uid in _lj_waiting:
+        fut = _lj_waiting.pop(uid)
+        if not fut.done():
+            fut.set_result(message)
+
+
+async def _ask(bot, user_id: int, text: str, reply_markup=None, timeout: int = 300):
+    """Send text and wait for the next private message from user_id."""
+    loop = asyncio.get_event_loop()
+    fut: asyncio.Future = loop.create_future()
+    old = _lj_waiting.pop(user_id, None)
+    if old and not old.done():
+        old.cancel()
+    _lj_waiting[user_id] = fut
+    await bot.send_message(user_id, text, reply_markup=reply_markup)
+    try:
+        return await asyncio.wait_for(fut, timeout=timeout)
+    except asyncio.TimeoutError:
+        _lj_waiting.pop(user_id, None)
+        raise
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # DB helpers
@@ -627,18 +656,18 @@ async def newjob_cmd(bot, message):
 
 
 async def _ask_dest(bot, user_id: int, channels: list, step_label: str, optional: bool = False) -> tuple:
-    """Helper: ask user to pick a channel from their saved list. Returns (chat_id, title) or (None,None)."""
+    """Helper: ask user to pick a channel from their saved list. Returns (chat_id, title, cancelled)."""
     btns = [[KeyboardButton(ch['title'])] for ch in channels]
     if optional:
         btns.append([KeyboardButton("⏭ Skip (no second destination)")])
     btns.append([KeyboardButton("/cancel")])
 
-    resp = await bot.ask(user_id, step_label,
-                         reply_markup=ReplyKeyboardMarkup(btns, resize_keyboard=True, one_time_keyboard=True))
+    resp = await _ask(bot, user_id, step_label,
+                      reply_markup=ReplyKeyboardMarkup(btns, resize_keyboard=True, one_time_keyboard=True))
 
     txt = resp.text.strip()
     if "/cancel" in txt:
-        await resp.reply("<b>Cancelled.</b>", reply_markup=ReplyKeyboardRemove())
+        await bot.send_message(user_id, "<b>Cancelled.</b>", reply_markup=ReplyKeyboardRemove())
         return None, None, True   # cancelled=True
 
     if optional and "skip" in txt.lower():
@@ -653,7 +682,7 @@ async def _ask_dest(bot, user_id: int, channels: list, step_label: str, optional
 
 async def _ask_topic(bot, user_id: int, dest_label: str) -> int | None:
     """Ask for optional topic thread ID. Returns int or None."""
-    r = await bot.ask(user_id,
+    r = await _ask(bot, user_id,
         f"<b>Topic Thread for {dest_label} (Optional)</b>\n\n"
         "• Send the <b>Thread ID</b> if you want to post inside a specific group topic\n"
         "• Send <b>0</b> or press 'No Topic' to post in the main chat\n\n"
@@ -700,7 +729,7 @@ async def _create_job_flow(bot, user_id: int):
     is_bot  = sel_acc.get("is_bot", True)
 
     # ── Step 2: Source ───────────────────────────────────────────────────────
-    src_r = await bot.ask(user_id,
+    src_r = await _ask(bot, user_id,
         "<b>Step 2/6 — Source Chat</b>\n\n"
         "Send one of:\n"
         "• <code>@username</code> or channel link\n"
@@ -756,7 +785,7 @@ async def _create_job_flow(bot, user_id: int):
         to_thread_2 = await _ask_topic(bot, user_id, "Second Destination")
 
     # ── Step 5: Batch Mode ───────────────────────────────────────────────────
-    batch_r = await bot.ask(user_id,
+    batch_r = await _ask(bot, user_id,
         "<b>Step 5/6 — Batch Mode (Copy Old Messages First)</b>\n\n"
         "Do you want to copy existing (old) messages before going live?\n\n"
         "• <b>ON</b> — first copies old messages, then watches for new ones\n"
@@ -778,7 +807,7 @@ async def _create_job_flow(bot, user_id: int):
     batch_end_id   = 0  # 0 = up to current latest
 
     if batch_mode:
-        range_r = await bot.ask(user_id,
+        range_r = await _ask(bot, user_id,
             "<b>Batch Range</b>\n\n"
             "Choose where to start the batch:\n\n"
             "• Send <b>ALL</b> to start from the very first message\n"
@@ -803,7 +832,7 @@ async def _create_job_flow(bot, user_id: int):
                 except Exception: pass
 
     # ── Step 6: Size / Duration Limit ───────────────────────────────────────
-    limit_r = await bot.ask(user_id,
+    limit_r = await _ask(bot, user_id,
         "<b>Step 6/6 — Per-Job Size Limit</b>\n\n"
         "Set a maximum file size and/or duration for this job.\n"
         "Files above the limit will be <b>silently skipped</b>.\n\n"

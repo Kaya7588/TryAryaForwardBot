@@ -26,6 +26,9 @@ async def _main_buttons(user_id: int):
             InlineKeyboardButton(_tx(lang, 'btn_settings'), callback_data='settings#main'),
             InlineKeyboardButton(_tx(lang, 'btn_jobs'),     callback_data='job#list'),
         ],
+        [
+            InlineKeyboardButton('⚡ Multi Job',    callback_data='mj#list'),
+        ],
     ]
 
 # ── static fallback used before user_id is available ──────────────────────
@@ -60,6 +63,11 @@ async def start(client, message):
     try:
         from .taskjob import resume_task_jobs
         await resume_task_jobs(user.id)
+    except Exception:
+        pass
+    try:
+        from .multijob import resume_multi_jobs
+        await resume_multi_jobs(user.id)
     except Exception:
         pass
     btns = await _main_buttons(user.id)
