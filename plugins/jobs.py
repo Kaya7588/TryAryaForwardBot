@@ -260,9 +260,12 @@ async def _run_job(job_id: str, user_id: int):
                 if not fresh or fresh.get("status") != "running":
                     return
 
-                disabled_types = await db.get_filters(user_id)
                 configs        = await db.get_configs(user_id)
-                remove_caption = 'rm_caption' in disabled_types
+                filters_cfg    = configs.get('filters', {})
+                # disabled_types: media type keys where v=False (forwarding is OFF for that type)
+                disabled_types = [k for k, v in filters_cfg.items() if v is False and k != 'rm_caption']
+                # rm_caption=True means user wants captions removed
+                remove_caption = filters_cfg.get('rm_caption', False)
                 sleep_secs     = max(1, int(configs.get('duration', 1) or 1))
 
                 chunk_end = min(batch_cursor + BATCH_CHUNK - 1, batch_end)
@@ -330,9 +333,10 @@ async def _run_job(job_id: str, user_id: int):
             if not fresh or fresh.get("status") != "running":
                 break
 
-            disabled_types: list = await db.get_filters(user_id)
             configs        = await db.get_configs(user_id)
-            remove_caption = 'rm_caption' in disabled_types
+            filters_cfg    = configs.get('filters', {})
+            disabled_types = [k for k, v in filters_cfg.items() if v is False and k != 'rm_caption']
+            remove_caption = filters_cfg.get('rm_caption', False)
 
             new_msgs: list = []
 
