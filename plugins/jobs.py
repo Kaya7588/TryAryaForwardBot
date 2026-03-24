@@ -146,17 +146,36 @@ async def _forward_message(
     client, msg,
     to_chat: int, remove_caption: bool, cap_tpl: str | None, forward_tag: bool = False,
     thread_id: int = None,
-    to_chat_2: int = None, thread_id_2: int = None
+    to_chat_2: int = None, thread_id_2: int = None,
+    replacements: dict = None
 ):
     """Copy message to 1 or 2 destinations. Falls back to forward_messages for locked chats."""
     from plugins.regix import custom_caption
+    import re
 
     # Compute caption
     new_caption = None
+    new_text = None
+    is_text_replaced = False
+
     if msg.media:
         new_caption = custom_caption(msg, cap_tpl)
         if remove_caption:
             new_caption = ""
+            
+        if replacements and new_caption:
+            for old_txt, new_txt_str in replacements.items():
+                try: new_caption = re.sub(old_txt, new_txt_str, new_caption, flags=re.IGNORECASE)
+                except Exception: new_caption = new_caption.replace(old_txt, new_txt_str)
+    else:
+        new_text = msg.text.html if msg.text else ""
+        if replacements and new_text:
+            orig_text = new_text
+            for old_txt, new_txt_str in replacements.items():
+                try: new_text = re.sub(old_txt, new_txt_str, new_text, flags=re.IGNORECASE)
+                except Exception: new_text = new_text.replace(old_txt, new_txt_str)
+            if orig_text != new_text:
+                is_text_replaced = True
 
     async def _send_one(chat, thread):
         kw = {"message_thread_id": thread} if thread else {}
@@ -170,10 +189,13 @@ async def _forward_message(
                     message_ids=msg.id, **kw
                 )
             else:
-                await client.copy_message(
-                    chat_id=chat, from_chat_id=msg.chat.id,
-                    message_id=msg.id, **kw
-                )
+                if is_text_replaced and not msg.media:
+                    await client.send_message(chat_id=chat, text=new_text, **kw)
+                else:
+                    await client.copy_message(
+                        chat_id=chat, from_chat_id=msg.chat.id,
+                        message_id=msg.id, **kw
+                    )
         except Exception as forward_exc:
             err = str(forward_exc).upper()
             if "RESTRICTED" not in err and "PROTECTED" not in err:
@@ -181,7 +203,10 @@ async def _forward_message(
                     if not forward_tag:
                         await client.forward_messages(chat_id=chat, from_chat_id=msg.chat.id, message_ids=msg.id, **kw)
                     else:
-                        await client.copy_message(chat_id=chat, from_chat_id=msg.chat.id, message_id=msg.id, **kw)
+                        if is_text_replaced and not msg.media:
+                            await client.send_message(chat_id=chat, text=new_text, **kw)
+                        else:
+                            await client.copy_message(chat_id=chat, from_chat_id=msg.chat.id, message_id=msg.id, **kw)
                     return
                 except Exception as e:
                     logger.debug(f"[Job forward] Failed to {chat}: {e}")
@@ -210,7 +235,7 @@ async def _forward_message(
                     import os
                     if os.path.exists(fp): os.remove(fp)
                 else:
-                    await client.send_message(chat_id=chat, text=msg.text or "", **kw)
+                    await client.send_message(chat_id=chat, text=new_text if new_text is not None else (msg.text.html if msg.text else ""), **kw)
             except Exception as fallback_e:
                 logger.debug(f"[Job forward] Fallback failed to {chat}: {fallback_e}")
 
@@ -286,6 +311,15 @@ async def _run_job(job_id: str, user_id: int):
             await _update_job(job_id, last_seen_id=last_seen)
             logger.info(f"[Job {job_id}] Initialised at msg ID {last_seen}")
 
+        # Warm up peer cache
+        try:
+            await client.get_chat(from_chat)
+            await client.get_chat(to_chat)
+            if to_chat_2:
+                await client.get_chat(to_chat_2)
+        except Exception as warn_e:
+            logger.warning(f"[Job {job_id}] Pre-fetch peer resolve warning: {warn_e}")
+
         # ── BATCH PHASE ────────────────────────────────────────────────────
         if job.get("batch_mode") and not job.get("batch_done"):
             batch_cursor = int(job.get("batch_cursor") or job.get("batch_start_id") or 1)
@@ -293,10 +327,12 @@ async def _run_job(job_id: str, user_id: int):
 
             # If no explicit end was set, use the snapshot we just captured
             if batch_end == 0:
-                batch_end = last_seen
+                batch_end = last_seen if last_seen > 0 else 999999999
                 await _update_job(job_id, batch_end_id=batch_end)
 
             logger.info(f"[Job {job_id}] Batch phase: msg {batch_cursor} → {batch_end}")
+            
+            consecutive_empty = 0
 
             while batch_cursor <= batch_end:
                 fresh = await _get_job(job_id)
@@ -310,6 +346,8 @@ async def _run_job(job_id: str, user_id: int):
                 cap_tpl        = configs.get('caption')
                 forward_tag    = configs.get('forward_tag', False)
                 sleep_secs     = max(1, int(configs.get('duration', 1) or 1))
+
+                replacements   = configs.get('replacements', {})
 
                 chunk_end = min(batch_cursor + BATCH_CHUNK - 1, batch_end)
                 batch_ids = list(range(batch_cursor, chunk_end + 1))
@@ -330,6 +368,14 @@ async def _run_job(job_id: str, user_id: int):
 
                 valid = [m for m in msgs if m and not m.empty and not m.service]
                 valid.sort(key=lambda m: m.id)
+                
+                if not valid:
+                    consecutive_empty += 1
+                    if consecutive_empty >= 50:
+                        logger.info(f"[Job {job_id}] Done — no more messages after {batch_cursor}")
+                        break
+                else:
+                    consecutive_empty = 0
 
                 fwd_count = 0
                 for msg in valid:
@@ -346,7 +392,7 @@ async def _run_job(job_id: str, user_id: int):
 
                     try:
                         await _forward_message(client, msg, to_chat, remove_caption, cap_tpl, forward_tag,
-                                               to_thread, to_chat_2, to_thread_2)
+                                               to_thread, to_chat_2, to_thread_2, replacements)
                         fwd_count += 1
                     except FloodWait as fw:
                         await asyncio.sleep(fw.value + 1)
@@ -382,6 +428,7 @@ async def _run_job(job_id: str, user_id: int):
             remove_caption = filters_dict.get('rm_caption', False)
             cap_tpl        = configs.get('caption')
             forward_tag    = configs.get('forward_tag', False)
+            replacements   = configs.get('replacements', {})
 
             new_msgs: list = []
 

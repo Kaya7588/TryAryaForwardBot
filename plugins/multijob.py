@@ -130,16 +130,35 @@ async def _mj_forward(
     client, msg,
     to_chat: int, remove_caption: bool, cap_tpl: str | None, forward_tag: bool = False,
     thread_id: int = None,
-    to_chat_2: int = None, thread_id_2: int = None
+    to_chat_2: int = None, thread_id_2: int = None,
+    replacements: dict = None
 ):
     from plugins.regix import custom_caption
+    import re
 
     # Compute caption
     new_caption = None
+    new_text = None
+    is_text_replaced = False
+
     if msg.media:
         new_caption = custom_caption(msg, cap_tpl)
         if remove_caption:
             new_caption = ""
+            
+        if replacements and new_caption:
+            for old_txt, new_txt_str in replacements.items():
+                try: new_caption = re.sub(old_txt, new_txt_str, new_caption, flags=re.IGNORECASE)
+                except Exception: new_caption = new_caption.replace(old_txt, new_txt_str)
+    else:
+        new_text = msg.text.html if msg.text else ""
+        if replacements and new_text:
+            orig_text = new_text
+            for old_txt, new_txt_str in replacements.items():
+                try: new_text = re.sub(old_txt, new_txt_str, new_text, flags=re.IGNORECASE)
+                except Exception: new_text = new_text.replace(old_txt, new_txt_str)
+            if orig_text != new_text:
+                is_text_replaced = True
 
     async def _send_one(chat, thread):
         kw = {"message_thread_id": thread} if thread else {}
@@ -153,10 +172,13 @@ async def _mj_forward(
                     message_ids=msg.id, **kw
                 )
             else:
-                await client.copy_message(
-                    chat_id=chat, from_chat_id=msg.chat.id,
-                    message_id=msg.id, **kw
-                )
+                if is_text_replaced and not msg.media:
+                    await client.send_message(chat_id=chat, text=new_text, **kw)
+                else:
+                    await client.copy_message(
+                        chat_id=chat, from_chat_id=msg.chat.id,
+                        message_id=msg.id, **kw
+                    )
         except Exception as exc:
             err = str(exc).upper()
             if "RESTRICTED" not in err and "PROTECTED" not in err:
@@ -164,7 +186,10 @@ async def _mj_forward(
                     if not forward_tag:
                         await client.forward_messages(chat_id=chat, from_chat_id=msg.chat.id, message_ids=msg.id, **kw)
                     else:
-                        await client.copy_message(chat_id=chat, from_chat_id=msg.chat.id, message_id=msg.id, **kw)
+                        if is_text_replaced and not msg.media:
+                            await client.send_message(chat_id=chat, text=new_text, **kw)
+                        else:
+                            await client.copy_message(chat_id=chat, from_chat_id=msg.chat.id, message_id=msg.id, **kw)
                     return
                 except Exception:
                     pass
@@ -192,7 +217,7 @@ async def _mj_forward(
                     import os
                     if os.path.exists(fp): os.remove(fp)
                 else:
-                    await client.send_message(chat_id=chat, text=msg.text or "", **kw)
+                    await client.send_message(chat_id=chat, text=new_text if new_text is not None else (msg.text.html if msg.text else ""), **kw)
             except Exception as fallback_e:
                 logger.debug(f"[MultiJob _send_one] Fallback failed to {chat}: {fallback_e}")
 
@@ -240,6 +265,15 @@ async def _run_multijob(job_id: str, user_id: int):
         await _mj_update(job_id, status="running", error="")
         logger.info(f"[MultiJob {job_id}] Started. current={current} end={end_id}")
 
+        # Warm up peer cache
+        try:
+            await client.get_chat(from_chat)
+            await client.get_chat(to_chat)
+            if to_chat_2:
+                await client.get_chat(to_chat_2)
+        except Exception as warn_e:
+            logger.warning(f"[MultiJob {job_id}] Pre-fetch peer resolve warning: {warn_e}")
+
         consecutive_empty = 0
 
         while True:
@@ -261,11 +295,11 @@ async def _run_multijob(job_id: str, user_id: int):
             disabled_types = await db.get_filters(user_id)
             configs        = await db.get_configs(user_id)
             filters_dict   = configs.get('filters', {})
-            # 'rm_caption' is True in DB when actively enabled via settings
             remove_caption = filters_dict.get('rm_caption', False)
             cap_tpl        = configs.get('caption')
             forward_tag    = configs.get('forward_tag', False)
             sleep_secs     = max(1, int(configs.get('duration', 1) or 1))
+            replacements   = configs.get('replacements', {})
 
             # Build batch
             batch_end = current + BATCH_SIZE - 1
@@ -324,7 +358,7 @@ async def _run_multijob(job_id: str, user_id: int):
                     continue
 
                 await _mj_forward(client, msg, to_chat, remove_caption, cap_tpl, forward_tag,
-                                   to_thread, to_chat_2, to_thread_2)
+                                   to_thread, to_chat_2, to_thread_2, replacements)
                 fwd_count += 1
                 await asyncio.sleep(sleep_secs)
 
