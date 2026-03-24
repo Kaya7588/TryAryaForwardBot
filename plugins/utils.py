@@ -65,5 +65,11 @@ class STS:
         button = parse_buttons(configs['button'] if configs['button'] else '')
         if configs['file_size'] != 0:
             size = [configs['file_size'], configs['size_limit']]
-        return bot, configs['caption'], configs['forward_tag'], {'download': configs.get('download', False), 'chat_id': k.FROM, 'limit': k.limit, 'offset': k.skip, 'filters': filters,
-                'keywords': configs['keywords'], 'media_size': size, 'extensions': configs['extension'], 'skip_duplicate': duplicate, 'duration': configs.get('duration', 1), 'reverse_order': getattr(k, 'reverse_order', False), 'smart_order': getattr(k, 'smart_order', True)}, configs['protect'], button
+        
+        return bot, configs['caption'], configs['forward_tag'], {
+            'download': configs.get('download', False), 'chat_id': k.FROM, 'limit': k.limit, 'offset': k.skip, 
+            'filters': filters, 'rm_caption': configs.get('filters', {}).get('rm_caption', False),
+            'keywords': configs['keywords'], 'media_size': size, 'extensions': configs['extension'], 
+            'skip_duplicate': duplicate, 'duration': configs.get('duration', 1), 
+            'reverse_order': getattr(k, 'reverse_order', False), 'smart_order': getattr(k, 'smart_order', True)
+        }, configs['protect'], button

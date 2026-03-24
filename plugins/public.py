@@ -229,7 +229,7 @@ async def run(bot, message):
     disabled_types = [t for t in all_types if t in active_filters]
 
     fwd_mode  = "🔄 Forward (tag on)" if configs.get('forward_tag') else "📋 Copy (no tag)"
-    caption_m = "✂️ Removed" if 'rm_caption' in active_filters else "📝 Kept"
+    caption_m = "✂️ Removed" if configs.get('filters', {}).get('rm_caption') else "📝 Kept"
     dl_mode   = "⬇️ Download mode ON" if configs.get('download') else "📤 Direct copy"
     order_lbl = "🔽 New to Old" if reverse_order else "🔼 Old to New"
     mode_lbl  = "🔁 Live (continuous)" if continuous else "📦 Batch"

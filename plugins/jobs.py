@@ -144,24 +144,30 @@ def _passes_size_limit(msg, max_size_mb: int, max_duration_secs: int) -> bool:
 
 async def _forward_message(
     client, msg,
-    to_chat: int, remove_caption: bool, thread_id: int = None,
+    to_chat: int, remove_caption: bool, cap_tpl: str | None,
+    thread_id: int = None,
     to_chat_2: int = None, thread_id_2: int = None
 ):
     """Copy message to 1 or 2 destinations. Falls back to forward_messages for locked chats."""
+    from plugins.regix import custom_caption
+
+    # Compute caption
+    new_caption = None
+    if msg.media:
+        new_caption = custom_caption(msg, cap_tpl)
+        if remove_caption:
+            new_caption = ""
 
     async def _send_one(chat, thread):
         kw = {"message_thread_id": thread} if thread else {}
+        if new_caption is not None:
+            kw["caption"] = new_caption
+
         try:
-            if remove_caption and msg.media:
-                await client.copy_message(
-                    chat_id=chat, from_chat_id=msg.chat.id,
-                    message_id=msg.id, caption="", **kw
-                )
-            else:
-                await client.copy_message(
-                    chat_id=chat, from_chat_id=msg.chat.id,
-                    message_id=msg.id, **kw
-                )
+            await client.copy_message(
+                chat_id=chat, from_chat_id=msg.chat.id,
+                message_id=msg.id, **kw
+            )
         except Exception:
             try:
                 await client.forward_messages(
@@ -260,12 +266,11 @@ async def _run_job(job_id: str, user_id: int):
                 if not fresh or fresh.get("status") != "running":
                     return
 
+                disabled_types = await db.get_filters(user_id)
                 configs        = await db.get_configs(user_id)
-                filters_cfg    = configs.get('filters', {})
-                # disabled_types: media type keys where v=False (forwarding is OFF for that type)
-                disabled_types = [k for k, v in filters_cfg.items() if v is False and k != 'rm_caption']
-                # rm_caption=True means user wants captions removed
-                remove_caption = filters_cfg.get('rm_caption', False)
+                filters_dict   = configs.get('filters', {})
+                remove_caption = filters_dict.get('rm_caption', False)
+                cap_tpl        = configs.get('caption')
                 sleep_secs     = max(1, int(configs.get('duration', 1) or 1))
 
                 chunk_end = min(batch_cursor + BATCH_CHUNK - 1, batch_end)
@@ -302,7 +307,7 @@ async def _run_job(job_id: str, user_id: int):
                         continue
 
                     try:
-                        await _forward_message(client, msg, to_chat, remove_caption,
+                        await _forward_message(client, msg, to_chat, remove_caption, cap_tpl,
                                                to_thread, to_chat_2, to_thread_2)
                         fwd_count += 1
                     except FloodWait as fw:
@@ -333,10 +338,11 @@ async def _run_job(job_id: str, user_id: int):
             if not fresh or fresh.get("status") != "running":
                 break
 
+            disabled_types: list = await db.get_filters(user_id)
             configs        = await db.get_configs(user_id)
-            filters_cfg    = configs.get('filters', {})
-            disabled_types = [k for k, v in filters_cfg.items() if v is False and k != 'rm_caption']
-            remove_caption = filters_cfg.get('rm_caption', False)
+            filters_dict   = configs.get('filters', {})
+            remove_caption = filters_dict.get('rm_caption', False)
+            cap_tpl        = configs.get('caption')
 
             new_msgs: list = []
 
@@ -390,7 +396,7 @@ async def _run_job(job_id: str, user_id: int):
                     last_seen = max(last_seen, msg.id)
                     continue
                 try:
-                    await _forward_message(client, msg, to_chat, remove_caption,
+                    await _forward_message(client, msg, to_chat, remove_caption, cap_tpl,
                                            to_thread, to_chat_2, to_thread_2)
                     fwd_count += 1
                 except FloodWait as fw:
@@ -755,9 +761,19 @@ async def _create_job_flow(bot, user_id: int):
         from_chat = from_chat_raw
         if from_chat.lstrip('-').isdigit():
             from_chat = int(from_chat)
+        elif "t.me/c/" in from_chat:
+            parts = from_chat.split("t.me/c/")[1].split("/")
+            if parts[0].isdigit():
+                from_chat = int(f"-100{parts[0]}")
+        elif "t.me/" in from_chat:
+            username = from_chat.split("t.me/")[1].split("/")[0].split("?")[0]
+            if not username.startswith("+"):
+                from_chat = username
+
         try:
             chat_obj   = await bot.get_chat(from_chat)
-            from_title = getattr(chat_obj, "title", None) or getattr(chat_obj, "first_name", str(from_chat))
+            from_title = (getattr(chat_obj, "title", None) or
+                          getattr(chat_obj, "first_name", None) or str(from_chat))
         except Exception:
             from_title = str(from_chat)
 

@@ -338,7 +338,7 @@ async def pub_(bot, message):
                 # Compute caption & replacements for this message before buffering
                 _filters = data.get('filters', [])
                 new_caption = custom_caption(message, caption)
-                if (message.audio or message.video or message.photo or message.document) and 'rm_caption' in _filters:
+                if (message.audio or message.video or message.photo or message.document) and data.get('rm_caption'):
                     new_caption = ""
 
                 replacements = data.get('replacements', {})

@@ -27,7 +27,6 @@ import logging
 from database import db
 from .test import CLIENT, start_clone_bot
 from pyrogram import Client, filters
-from config import Config
 from pyrogram.errors import FloodWait
 from pyrogram.types import (
     InlineKeyboardButton, InlineKeyboardMarkup,
@@ -42,45 +41,6 @@ _CLIENT = CLIENT()
 _task_jobs: dict[str, asyncio.Task] = {}
 # task_job_id → pause Event (set = running, clear = paused)
 _pause_events: dict[str, asyncio.Event] = {}
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Safe ask() helper — immune to pyrofork stale-listener bugs
-# A dict maps user_id → asyncio.Future so only ONE handler is needed globally.
-# ══════════════════════════════════════════════════════════════════════════════
-
-# user_id → Future that resolves with the next Message from that user
-_waiting: dict[int, asyncio.Future] = {}
-
-
-@Client.on_message(filters.private, group=-10)
-async def _taskjob_input_router(bot, message):
-    """Catch all private messages and route them to any waiting _ask() futures."""
-    uid = message.from_user.id if message.from_user else None
-    if uid and uid in _waiting:
-        fut = _waiting.pop(uid)
-        if not fut.done():
-            fut.set_result(message)
-
-
-async def _ask(bot, user_id: int, text: str, reply_markup=None, timeout: int = 300):
-    """
-    Send `text` to `user_id`, then wait for their next private message.
-    Uses a module-level Future dict — none of pyrofork's listener machinery involved.
-    """
-    loop = asyncio.get_event_loop()
-    fut: asyncio.Future = loop.create_future()
-    # Cancel any stale future that may be lingering from a previous run
-    old = _waiting.pop(user_id, None)
-    if old and not old.done():
-        old.cancel()
-    _waiting[user_id] = fut
-    await bot.send_message(user_id, text, reply_markup=reply_markup)
-    try:
-        return await asyncio.wait_for(fut, timeout=timeout)
-    except asyncio.TimeoutError:
-        _waiting.pop(user_id, None)
-        raise
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -153,13 +113,11 @@ def _passes_filters(msg, disabled_types: list) -> bool:
 
 async def _send_one(client, msg, to_chat: int, remove_caption: bool, caption_tpl: str | None):
     """Send a single message via copy_message. Falls back to download/re-upload if restricted."""
-    from plugins.regix import custom_caption
-
     caption = None
-    if msg.media:
-        caption = custom_caption(msg, caption_tpl)
-        if remove_caption:
-            caption = ""
+    if caption_tpl and msg.media:
+        caption = caption_tpl
+    elif remove_caption and msg.media:
+        caption = ""
 
     # ── Attempt 1: copy_message ──────────────────────────────────────────────
     try:
@@ -280,8 +238,7 @@ async def _run_task_job(job_id: str, user_id: int):
             # ── Load settings ─────────────────────────────────────────────
             disabled_types = await db.get_filters(user_id)
             configs        = await db.get_configs(user_id)
-            filters_dict   = configs.get('filters', {})
-            remove_caption = filters_dict.get('rm_caption', False)
+            remove_caption = 'rm_caption' in disabled_types
             cap_tpl        = configs.get('caption')
             sleep_secs     = max(1, configs.get('duration', 1) or 1)
 
@@ -323,9 +280,9 @@ async def _run_task_job(job_id: str, user_id: int):
                     max_probe = batch_end
                     found_any = any(m and not m.empty for m in msgs)
                     if not found_any:
-                        # 50 consecutive empty batches = done (10,000 max skip ids)
+                        # 3 consecutive empty batches = done
                         consecutive_empty = fresh.get("consecutive_empty", 0) + 1
-                        if consecutive_empty >= 50:
+                        if consecutive_empty >= 3:
                             await _tj_update(job_id, status="done", current_id=current)
                             logger.info(f"[TaskJob {job_id}] Done — no more messages after {current}")
                             break
@@ -659,7 +616,7 @@ async def _create_taskjob_flow(bot, user_id: int):
     )] for a in accounts]
     acc_btns.append([KeyboardButton("/cancel")])
 
-    acc_r = await _ask(bot, user_id,
+    acc_r = await bot.ask(user_id,
         "<b>📦 Create Task Job — Step 1/4</b>\n\n"
         "Choose the account to use for this task:\n"
         "<i>(Userbot required for private/restricted channels)</i>",
@@ -676,7 +633,7 @@ async def _create_taskjob_flow(bot, user_id: int):
     is_bot  = sel_acc.get("is_bot", True)
 
     # ── Step 2: Source Chat ──────────────────────────────────────────────────
-    src_r = await _ask(bot, user_id,
+    src_r = await bot.ask(user_id,
         "<b>Step 2/4 — Source Channel</b>\n\n"
         "Send the source channel:\n"
         "• <code>@username</code>\n"
@@ -706,7 +663,7 @@ async def _create_taskjob_flow(bot, user_id: int):
         from_title = str(from_chat)
 
     # ── Step 3: Start ID and End ID ─────────────────────────────────────────
-    range_r = await _ask(bot, user_id,
+    range_r = await bot.ask(user_id,
         "<b>Step 3/4 — Message Range</b>\n\n"
         "Choose how many messages to copy:\n\n"
         "• Send <b>ALL</b> to copy all messages from the beginning\n"
@@ -742,7 +699,7 @@ async def _create_taskjob_flow(bot, user_id: int):
     ch_btns = [[KeyboardButton(ch['title'])] for ch in channels]
     ch_btns.append([KeyboardButton("/cancel")])
 
-    ch_r = await _ask(bot, user_id,
+    ch_r = await bot.ask(user_id,
         "<b>Step 4/4 — Target Channel</b>\n\nChoose where to forward messages:",
         reply_markup=ReplyKeyboardMarkup(ch_btns, resize_keyboard=True, one_time_keyboard=True))
 

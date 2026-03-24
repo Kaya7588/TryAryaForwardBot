@@ -103,24 +103,18 @@ async def _mj_inc(job_id: str, n: int = 1):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _passes_filters(msg, disabled_types: list) -> bool:
-    """Return True if the message should be forwarded.
-    disabled_types = keys from filters where value is False (feature is OFF).
-    For media types: in the list = forward disabled for that type.
-    For rm_caption: NOT checked here (it's a setting, not a skip filter).
-    """
     if msg.empty or msg.service:
         return False
     checks = [
-        # Pure text only (media messages with captions are NOT pure text)
-        ('text',      lambda m: (m.text is not None) and not m.media),
-        ('audio',     lambda m: m.audio is not None),
-        ('voice',     lambda m: m.voice is not None),
-        ('video',     lambda m: m.video is not None),
-        ('photo',     lambda m: m.photo is not None),
-        ('document',  lambda m: m.document is not None),
-        ('animation', lambda m: m.animation is not None),
-        ('sticker',   lambda m: m.sticker is not None),
-        ('poll',      lambda m: m.poll is not None),
+        ('text',      lambda m: m.text and not m.media),
+        ('audio',     lambda m: m.audio),
+        ('voice',     lambda m: m.voice),
+        ('video',     lambda m: m.video),
+        ('photo',     lambda m: m.photo),
+        ('document',  lambda m: m.document),
+        ('animation', lambda m: m.animation),
+        ('sticker',   lambda m: m.sticker),
+        ('poll',      lambda m: m.poll),
     ]
     for typ, check in checks:
         if typ in disabled_types and check(msg):
@@ -134,40 +128,37 @@ def _passes_filters(msg, disabled_types: list) -> bool:
 
 async def _mj_forward(
     client, msg,
-    to_chat: int, remove_caption: bool, thread_id: int = None,
+    to_chat: int, remove_caption: bool, cap_tpl: str | None,
+    thread_id: int = None,
     to_chat_2: int = None, thread_id_2: int = None
 ):
-    """Copy message to 1 or 2 destinations.
-    
-    remove_caption=True → strip caption + entities (removes links/text from media).
-    Falls back to forward_messages if copy fails (e.g. forwarding-restricted channels).
-    """
+    from plugins.regix import custom_caption
+
+    # Compute caption
+    new_caption = None
+    if msg.media:
+        new_caption = custom_caption(msg, cap_tpl)
+        if remove_caption:
+            new_caption = ""
+
     async def _send_one(chat, thread):
         kw = {"message_thread_id": thread} if thread else {}
+        if new_caption is not None:
+            kw["caption"] = new_caption
+
         try:
-            if msg.media and remove_caption:
-                # Strip caption AND all caption entities (links, bold, etc.)
-                await client.copy_message(
-                    chat_id=chat, from_chat_id=msg.chat.id,
-                    message_id=msg.id, caption="", caption_entities=[], **kw
-                )
-            elif not msg.media and remove_caption:
-                # Pure text message with rm_caption on → skip forwarding it
-                return
-            else:
-                await client.copy_message(
-                    chat_id=chat, from_chat_id=msg.chat.id,
-                    message_id=msg.id, **kw
-                )
-        except Exception as copy_err:
-            logger.debug(f"[MultiJob] copy_message failed ({chat}): {copy_err} — trying forward")
+            await client.copy_message(
+                chat_id=chat, from_chat_id=msg.chat.id,
+                message_id=msg.id, **kw
+            )
+        except Exception:
             try:
                 await client.forward_messages(
                     chat_id=chat, from_chat_id=msg.chat.id,
                     message_ids=msg.id, **kw
                 )
-            except Exception as fwd_err:
-                logger.warning(f"[MultiJob] forward_messages also failed ({chat}): {fwd_err}")
+            except Exception as e:
+                logger.debug(f"[MultiJob _send_one] Failed to {chat}: {e}")
 
     await _send_one(to_chat, thread_id)
     if to_chat_2:
@@ -211,11 +202,8 @@ async def _run_multijob(job_id: str, user_id: int):
         current     = int(job.get("current_id") or job.get("start_id") or 1)
 
         await _mj_update(job_id, status="running", error="")
-        logger.info(f"[MultiJob {job_id}] Started. current={current} end={end_id or 'unlimited'}")
+        logger.info(f"[MultiJob {job_id}] Started. current={current} end={end_id}")
 
-        # How many consecutive all-empty batches before we assume we've reached the end
-        # For unlimited jobs (end_id=0), stop after 5 empty batches; for ranged jobs, stop after 3.
-        MAX_EMPTY = 3 if end_id > 0 else 5
         consecutive_empty = 0
 
         while True:
@@ -227,22 +215,22 @@ async def _run_multijob(job_id: str, user_id: int):
             if not fresh or fresh.get("status") in ("stopped", "error"):
                 break
 
-            # End check (ranged jobs only)
+            # End check
             if end_id > 0 and current > end_id:
                 await _mj_update(job_id, status="done", current_id=current)
                 logger.info(f"[MultiJob {job_id}] Done — reached end_id {end_id}")
                 break
 
-            # Load user settings on every iteration so changes take effect immediately
+            # Load user settings
+            disabled_types = await db.get_filters(user_id)
             configs        = await db.get_configs(user_id)
-            filters_cfg    = configs.get('filters', {})
-            # disabled_types = filter keys where value is False (i.e., OFF/disabled)
-            disabled_types = [k for k, v in filters_cfg.items() if v is False and k != 'rm_caption']
-            # rm_caption: True means user wants captions removed
-            remove_caption = filters_cfg.get('rm_caption', False)
+            filters_dict   = configs.get('filters', {})
+            # 'rm_caption' is True in DB when actively enabled via settings
+            remove_caption = filters_dict.get('rm_caption', False)
+            cap_tpl        = configs.get('caption')
             sleep_secs     = max(1, int(configs.get('duration', 1) or 1))
 
-            # Build batch of IDs
+            # Build batch
             batch_end = current + BATCH_SIZE - 1
             if end_id > 0:
                 batch_end = min(batch_end, end_id)
@@ -250,11 +238,14 @@ async def _run_multijob(job_id: str, user_id: int):
 
             # Fetch messages
             try:
-                msgs = await client.get_messages(from_chat, batch_ids)
+                if not is_bot:
+                    # Userbot: get_messages by ID
+                    msgs = await client.get_messages(from_chat, batch_ids)
+                else:
+                    msgs = await client.get_messages(from_chat, batch_ids)
                 if not isinstance(msgs, list):
                     msgs = [msgs]
             except FloodWait as fw:
-                logger.info(f"[MultiJob {job_id}] FloodWait {fw.value}s")
                 await asyncio.sleep(fw.value + 2)
                 continue
             except asyncio.CancelledError:
@@ -271,25 +262,19 @@ async def _run_multijob(job_id: str, user_id: int):
 
             if not valid:
                 consecutive_empty += 1
-                logger.debug(f"[MultiJob {job_id}] Empty batch at {current} ({consecutive_empty}/{MAX_EMPTY})")
-                if consecutive_empty >= MAX_EMPTY:
-                    if end_id > 0:
-                        # Ranged job — truly done
-                        await _mj_update(job_id, status="done", current_id=current)
-                        logger.info(f"[MultiJob {job_id}] Done — no messages after {current} (ranged)")
-                    else:
-                        # Unlimited job — done (reached live end)
-                        await _mj_update(job_id, status="done", current_id=current)
-                        logger.info(f"[MultiJob {job_id}] Done — no more messages after {current}")
+                if consecutive_empty >= 50:  # Allow 10,000 empty messages before giving up
+                    await _mj_update(job_id, status="done", current_id=current)
+                    logger.info(f"[MultiJob {job_id}] Done — no more messages after {current}")
                     break
-                current = batch_end + 1
+                current += BATCH_SIZE
                 await _mj_update(job_id, current_id=current, consecutive_empty=consecutive_empty)
-                await asyncio.sleep(1)
+                await asyncio.sleep(2)
                 continue
 
             consecutive_empty = 0
+            await _mj_update(job_id, consecutive_empty=0)
 
-            # Forward each valid message in order
+            # Forward each valid message
             fwd_count = 0
             for msg in valid:
                 await pause_ev.wait()
@@ -299,26 +284,18 @@ async def _run_multijob(job_id: str, user_id: int):
                     return
 
                 if not _passes_filters(msg, disabled_types):
-                    logger.debug(f"[MultiJob {job_id}] Filtered msg {msg.id}")
                     continue
 
-                try:
-                    await _mj_forward(client, msg, to_chat, remove_caption,
-                                       to_thread, to_chat_2, to_thread_2)
-                    fwd_count += 1
-                except FloodWait as fw:
-                    await asyncio.sleep(fw.value + 1)
-                except Exception as e:
-                    logger.warning(f"[MultiJob {job_id}] Forward error msg {msg.id}: {e}")
-
+                await _mj_forward(client, msg, to_chat, remove_caption, cap_tpl,
+                                   to_thread, to_chat_2, to_thread_2)
+                fwd_count += 1
                 await asyncio.sleep(sleep_secs)
 
-            # Advance cursor past the last message we processed
+            # Advance cursor
             current = valid[-1].id + 1
             await _mj_update(job_id, current_id=current)
             if fwd_count:
                 await _mj_inc(job_id, fwd_count)
-                logger.info(f"[MultiJob {job_id}] Forwarded {fwd_count} messages. cursor={current}")
 
     except asyncio.CancelledError:
         logger.info(f"[MultiJob {job_id}] Cancelled")
@@ -685,6 +662,15 @@ async def _create_mj_flow(bot, user_id: int):
         from_chat = from_chat_raw
         if from_chat.lstrip('-').isdigit():
             from_chat = int(from_chat)
+        elif "t.me/c/" in from_chat:
+            parts = from_chat.split("t.me/c/")[1].split("/")
+            if parts[0].isdigit():
+                from_chat = int(f"-100{parts[0]}")
+        elif "t.me/" in from_chat:
+            username = from_chat.split("t.me/")[1].split("/")[0].split("?")[0]
+            if not username.startswith("+"):
+                from_chat = username
+
         try:
             chat_obj   = await bot.get_chat(from_chat)
             from_title = (getattr(chat_obj, "title", None) or
