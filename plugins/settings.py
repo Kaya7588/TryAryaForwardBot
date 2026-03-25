@@ -474,9 +474,9 @@ async def main_buttons(user_id=None):
           pass
 
   if mode == 'merger':
-      # ── MERGER MODE UI ─────────────────────────────────────────────────
+      # ── MERGER MODE: Clean separate menu ────────────────────────────────
       buttons = [[
-           InlineKeyboardButton('🔀 Merger Mode ✅',
+           InlineKeyboardButton('🔀 Merger Mode ✅  ⟶  Tap to switch',
                         callback_data='settings#toggle_mode')
            ],[
            InlineKeyboardButton('🤖 Aᴄᴄᴏᴜɴᴛs',
@@ -484,20 +484,17 @@ async def main_buttons(user_id=None):
            InlineKeyboardButton('🏷 Cʜᴀɴɴᴇʟs',
                         callback_data='settings#channels')
            ],[
-           InlineKeyboardButton('🎵 Audio Merge',
-                        callback_data='merge#audio_menu'),
-           InlineKeyboardButton('🎬 Video Merge',
-                        callback_data='merge#video_menu')
-           ],[
-           InlineKeyboardButton('🌐 Language / भाषा',
-                        callback_data='settings#lang')
+           InlineKeyboardButton('🎵 Aᴜᴅɪᴏ Mᴇʀɢᴇ',
+                        callback_data='mg#audio_list'),
+           InlineKeyboardButton('🎬 Vɪᴅᴇᴏ Mᴇʀɢᴇ',
+                        callback_data='mg#video_list')
            ],[
            InlineKeyboardButton('⫷ Bᴀᴄᴋ', callback_data='back')
            ]]
   else:
-      # ── FORWARD MODE UI (original) ─────────────────────────────────────
+      # ── FORWARD MODE: Full original menu ────────────────────────────────
       buttons = [[
-           InlineKeyboardButton('📤 Forward Mode ✅',
+           InlineKeyboardButton('📤 Forward Mode ✅  ⟶  Tap to switch',
                         callback_data='settings#toggle_mode')
            ],[
            InlineKeyboardButton('🤖 Aᴄᴄᴏᴜɴᴛs',
