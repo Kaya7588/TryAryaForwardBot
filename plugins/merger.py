@@ -592,11 +592,12 @@ async def _run_job(jid, uid, bot):
         # Use video_cover for video creation; fall back to audio cover if no dedicated one
         effective_cover_for_video = video_cover or cover
 
+        _vid_text = '\n🎥 Building MP4 video...' if make_video else ''
+        _spd_text = f'⚡ Applying speed {speed}x during final merge' if abs(speed-1.0)>0.001 else '🎯 Lossless combine (speed=1.0x)'
         try:
             await bot.send_message(uid,
                 f"<b>🔀 Final combine: {len(part_files)} parts → {out_name}{out_ext}</b>\n"
-                f"{'⚡ Applying speed ' + str(speed) + 'x during final merge' if abs(speed-1.0)>0.001 else '🎯 Lossless combine (speed=1.0x)'}"
-                f"{'\n🎥 Building MP4 video...' if make_video else ''}")
+                f"{_spd_text}{_vid_text}")
         except: pass
 
         part_files_sorted = sorted(part_files, key=lambda p: os.path.basename(p))
