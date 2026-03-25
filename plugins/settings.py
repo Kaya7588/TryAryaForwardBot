@@ -14,7 +14,7 @@ async def settings(client, message):
     user_id = message.from_user.id
     await message.reply_text(
         await t(user_id, 'settings_title'),
-        reply_markup=main_buttons()
+        reply_markup=await main_buttons(user_id)
     )
     
 @Client.on_callback_query(filters.regex(r'^settings#(?!lang$|cleanmsg$)'))
@@ -27,7 +27,7 @@ async def settings_query(bot, query):
      user_id = query.from_user.id
      await query.message.edit_text(
        await t(user_id, 'settings_title'),
-       reply_markup=main_buttons())
+       reply_markup=await main_buttons(user_id))
           
   elif type=="accounts":
      bots = await db.get_bots(user_id)
@@ -450,9 +450,36 @@ async def settings_query(bot, query):
   elif type.startswith("alert"):
     alert = type.split('_')[1]
     await query.answer(alert, show_alert=True)
-      
-def main_buttons():
+
+  elif type == "toggle_mode":
+    data = await get_configs(user_id)
+    current = data.get('bot_mode', 'forward')
+    new_mode = 'merger' if current == 'forward' else 'forward'
+    await update_configs(user_id, 'bot_mode', new_mode)
+    mode_lbl = "🔀 Merger" if new_mode == 'merger' else "📤 Forward"
+    await query.answer(f"Mode switched to {mode_lbl}!", show_alert=True)
+    await query.message.edit_text(
+        await t(user_id, 'settings_title'),
+        reply_markup=await main_buttons(user_id)
+    )
+
+async def main_buttons(user_id=None):
+  # Get current mode
+  mode = 'forward'
+  if user_id:
+      try:
+          data = await get_configs(user_id)
+          mode = data.get('bot_mode', 'forward')
+      except Exception:
+          pass
+
+  mode_icon = "📤" if mode == 'forward' else "🔀"
+  mode_label = "Forward Mode" if mode == 'forward' else "Merger Mode"
+
   buttons = [[
+       InlineKeyboardButton(f'{mode_icon} {mode_label}',
+                    callback_data='settings#toggle_mode')
+       ],[
        InlineKeyboardButton('🤖 Aᴄᴄᴏᴜɴᴛs',
                     callback_data=f'settings#accounts'),
        InlineKeyboardButton('🏷 Cʜᴀɴɴᴇʟs',
@@ -479,6 +506,7 @@ def main_buttons():
        InlineKeyboardButton('⫷ Bᴀᴄᴋ', callback_data='back')
        ]]
   return InlineKeyboardMarkup(buttons)
+
 
 
 def size_limit(limit):
