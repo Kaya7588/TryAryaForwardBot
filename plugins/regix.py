@@ -251,9 +251,9 @@ async def pub_(bot, message):
                 pling += 1
                 if pling % 5 == 0:
                    await edit(m, 'Progressing', 10, sts)
-                 if pling % 10 == 0:
-                    _fwded = int(sts.get('total_files') or 0)
-                    asyncio.create_task(channel_progress_update(client, _dest_chat, _fwded, _total_msgs))
+                if pling % 10 == 0:
+                    _fwded = int(sts.get('total_files') or 0)
+                    asyncio.create_task(channel_progress_update(client, _dest_chat, _fwded, _total_msgs))
                 # Check message type filtering
                 is_filtered = False
                 _filters = data.get('filters', [])
