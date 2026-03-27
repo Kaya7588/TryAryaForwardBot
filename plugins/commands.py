@@ -120,13 +120,46 @@ async def back(bot, query):
         text=await t(user_id, 'START_TXT', query.from_user.first_name),
     )
 
+def get_bot_version():
+    try:
+        import subprocess
+        r = subprocess.run(["git", "log", "-1", "--format=%h (%cs)"], capture_output=True, text=True)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    except Exception:
+        pass
+    return "Unknown"
+
+def get_whats_new():
+    try:
+        import subprocess
+        r = subprocess.run(["git", "log", "-15", "--format=• %s"], capture_output=True, text=True)
+        if r.returncode == 0 and r.stdout.strip():
+            return r.stdout.strip()
+    except Exception:
+        pass
+    return "No recent updates found."
+
 @Client.on_callback_query(filters.regex(r'^about'))
 async def about(bot, query):
     user_id = query.from_user.id
     lang = await db.get_language(user_id)
     await query.message.edit_text(
-        text=_tx(lang, 'ABOUT_TXT', python_version=python_version()),
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩ Back', callback_data='back')]]),
+        text=_tx(lang, 'ABOUT_TXT', python_version=python_version(), bot_version=get_bot_version()),
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton('🆕 Wʜᴀᴛ\'s Nᴇᴡ', callback_data='whatsnew')],
+            [InlineKeyboardButton('↩ Bᴀᴄᴋ', callback_data='back')]
+        ]),
+        disable_web_page_preview=True,
+        parse_mode=enums.ParseMode.HTML,
+    )
+
+@Client.on_callback_query(filters.regex(r'^whatsnew'))
+async def whats_new(bot, query):
+    text = f"<b><u>🆕 WHAT'S NEW (Latest Updates)</u></b>\n\n{get_whats_new()}"
+    await query.message.edit_text(
+        text=text,
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩ Bᴀᴄᴋ', callback_data='about')]]),
         disable_web_page_preview=True,
         parse_mode=enums.ParseMode.HTML,
     )
