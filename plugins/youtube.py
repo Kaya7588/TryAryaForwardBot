@@ -81,14 +81,33 @@ def get_authenticated_service():
             creds = _Credentials.from_authorized_user_file(TOKEN_FILE, YOUTUBE_SCOPES)
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
-                creds.refresh(_Request())
-                with open(TOKEN_FILE, 'w') as token:
-                    token.write(creds.to_json())
+                try:
+                    creds.refresh(_Request())
+                    with open(TOKEN_FILE, 'w') as token:
+                        token.write(creds.to_json())
+                except Exception as refresh_err:
+                    err_str = str(refresh_err).lower()
+                    # Stale token with wrong scopes — delete it and force re-auth
+                    if "invalid_scope" in err_str or "invalid_grant" in err_str or "bad request" in err_str:
+                        logger.warning(f"[ytauth] Stale/invalid token detected ({refresh_err}). Deleting token file — re-auth required.")
+                        try:
+                            os.remove(TOKEN_FILE)
+                        except Exception:
+                            pass
+                    return None
             else:
                 return None
         return _yt_build('youtube', 'v3', credentials=creds)
     except Exception as e:
-        logger.error(f"[ytauth] get_authenticated_service error: {e}")
+        err_str = str(e).lower()
+        if "invalid_scope" in err_str or "invalid_grant" in err_str or "bad request" in err_str:
+            logger.warning(f"[ytauth] Stale/invalid token detected ({e}). Deleting token — re-auth required.")
+            try:
+                os.remove(TOKEN_FILE)
+            except Exception:
+                pass
+        else:
+            logger.error(f"[ytauth] get_authenticated_service error: {e}")
         return None
 
 
