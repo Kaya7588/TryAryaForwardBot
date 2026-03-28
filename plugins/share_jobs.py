@@ -92,17 +92,50 @@ async def sl_callback(bot, query):
         
         # Ranges
         try:
-            msg = await _ask(bot, user_id, "<b>❪ STEP 4: MESSAGE RANGE ❫</b>\n\nFormat: <code>START_ID-END_ID</code>\nExample: <code>1-558</code>\n\nType /cancel to abort.")
-            if msg.text == "/cancel": return await msg.reply_text("Cancelled.")
+            markup = ReplyKeyboardMarkup([[KeyboardButton("/cancel")]], resize_keyboard=True, one_time_keyboard=True)
             
-            parts = msg.text.strip().split('-')
-            start_id, end_id = int(parts[0]), int(parts[1])
+            def parse_id(text: str) -> int:
+                text = text.strip().rstrip('/')
+                if text.isdigit(): return int(text)
+                if "t.me/" in text:
+                    parts = text.split('/')
+                    if parts[-1].isdigit(): return int(parts[-1])
+                raise ValueError("Invalid Message ID or Link")
+            
+            # ── Step 4: Start ID / Link ───────────────────────────────────────────────
+            msg_start = await _ask(bot, user_id, 
+                "<b>❪ STEP 4: START MESSAGE ❫</b>\n\nForward the first message, send its Message ID, or paste its Link (e.g. <code>https://t.me/c/123/456</code>):", 
+                reply_markup=markup
+            )
+            if msg_start.text == "/cancel": return await msg_start.reply("Cancelled.", reply_markup=ReplyKeyboardRemove())
+            
+            start_id = parse_id(msg_start.text)
             new_share_job[user_id]['start_id'] = start_id
+            
+            # ── Step 5: End ID / Link   ───────────────────────────────────────────────
+            msg_end = await _ask(bot, user_id, 
+                "<b>❪ STEP 5: LAST MESSAGE ❫</b>\n\nForward the last message, send its Msg ID, or paste its Link:", 
+                reply_markup=markup
+            )
+            if msg_end.text == "/cancel": return await msg_end.reply("Cancelled.", reply_markup=ReplyKeyboardRemove())
+            
+            end_id = parse_id(msg_end.text)
             new_share_job[user_id]['end_id'] = end_id
             
-            # Batch Size
-            msg2 = await _ask(bot, user_id, "<b>❪ STEP 5: EPISODES PER LINK ❫</b>\n\nHow many files should be grouped in one link?\nExample: <code>50</code>")
-            batch_size = int(msg2.text.strip())
+            if start_id > end_id:
+                start_id, end_id = end_id, start_id
+                new_share_job[user_id]['start_id'] = start_id
+                new_share_job[user_id]['end_id'] = end_id
+            
+            # ── Step 6: Batch Size ──────────────────────────────────────────────────
+            msg_batch = await _ask(bot, user_id, 
+                "<b>❪ STEP 6: EPISODES PER LINK ❫</b>\n\nHow many files should be grouped in one link?\nExample: <code>50</code>", 
+                reply_markup=markup
+            )
+            if msg_batch.text == "/cancel": return await msg_batch.reply("Cancelled.", reply_markup=ReplyKeyboardRemove())
+            
+            batch_size = int(msg_batch.text.strip())
+            if batch_size < 1: batch_size = 50
             new_share_job[user_id]['batch_size'] = batch_size
             
             sj = new_share_job[user_id]
@@ -121,7 +154,7 @@ async def sl_callback(bot, query):
                 reply_markup=InlineKeyboardMarkup(btn)
             )
         except Exception as e:
-            await bot.send_message(user_id, f"<b>Error parsing input:</b> {e}")
+            await bot.send_message(user_id, f"<b>Error parsing input:</b> {e}", reply_markup=ReplyKeyboardRemove())
 
 
     elif cmd == "build":
