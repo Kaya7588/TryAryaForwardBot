@@ -51,8 +51,14 @@ async def check_all_subscriptions(client, user_id: int, fsub_channels: list) -> 
     return not_joined
 
 
-async def start_share_bot(token: str):
+async def start_share_bot(token: str = None):
+    """Start the Share Bot client. If token is None, loads from DB."""
     global share_client
+    if not token:
+        token = await db.get_share_bot_token()
+    if not token:
+        logger.warning("Share Bot token not set — skipping startup.")
+        return
     if share_client:
         try:
             await share_client.stop()
@@ -65,6 +71,8 @@ async def start_share_bot(token: str):
         api_hash=Config.API_HASH,
         in_memory=True,
     )
+    # Register handlers BEFORE starting so Pyrogram picks them up
+    register_share_handlers(share_client)
     await share_client.start()
     logger.info(f"Share Bot started: @{share_client.me.username}")
 
