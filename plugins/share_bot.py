@@ -93,7 +93,7 @@ async def start_share_bot(token=None):
     
     try:
         share_client = Client(
-            name="share_bot_session",
+            name=":memory:",
             api_id=Config.API_ID,
             api_hash=Config.API_HASH,
             bot_token=token,

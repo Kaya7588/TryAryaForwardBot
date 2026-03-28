@@ -17,154 +17,145 @@ _CLIENT = CLIENT()
 
 new_share_job = {}
 
-@Client.on_callback_query(filters.regex(r'^sl#'))
-async def sl_callback(bot, query):
-    user_id = query.from_user.id
-    data = query.data.split('#')
-    cmd = data[1]
-
-    if cmd == "start":
-        await query.message.delete()
-        # 1. Accounts
+async def _create_share_flow(bot, user_id):
+    try:
+        new_share_job[user_id] = {}
         bots = await db.get_bots(user_id)
         if not bots:
             return await bot.send_message(user_id, "<b>❌ No accounts. Add one in /settings → Accounts first.</b>")
             
-        new_share_job[user_id] = {}
-        
-        btns = []
-        
-        # Explicitly add the Share Bot Token if it's set
+        kb = []
         share_token = await db.get_share_bot_token()
         if share_token:
-            btns.append([InlineKeyboardButton("🤖 (Dedicated) Share Bot", callback_data="sl#acc_SHAREBOT")])
-        
+            kb.append(["🤖 (Dedicated) Share Bot"])
+            
         for b in bots:
             typ = "🤖" if b.get('is_bot', True) else "👤"
-            btns.append([InlineKeyboardButton(f"{typ} {b['name']}", callback_data=f"sl#acc_{b['id']}")])
-        btns.append([InlineKeyboardButton("❌ Cancel", callback_data="back")])
+            kb.append([f"{typ} {b['name']}"])
+            
+        kb.append(["❌ Cancel"])
         
-        await bot.send_message(
-            user_id,
+        msg = await _ask(bot, user_id, 
             "<b>❪ SHARE LINKS: SELECT ACCOUNT ❫</b>\n\nChoose the account that has Admin access to both the Source Database Channel and Target Channel:",
-            reply_markup=InlineKeyboardMarkup(btns)
+            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True)
         )
+        if not msg.text or msg.text == "/cancel" or "Cancel" in msg.text:
+            return await bot.send_message(user_id, "<b>Cancelled.</b>", reply_markup=ReplyKeyboardRemove())
+            
+        if "Share Bot" in msg.text:
+            new_share_job[user_id]['bot_id'] = "SHAREBOT"
+        else:
+            sel_name = msg.text.split(" ", 1)[1] if " " in msg.text else msg.text
+            acc = next((a for a in bots if a["name"] == sel_name), None)
+            if not acc:
+                return await bot.send_message(user_id, "<b>❌ Account not found.</b>", reply_markup=ReplyKeyboardRemove())
+            new_share_job[user_id]['bot_id'] = acc['id']
 
-    elif cmd.startswith("acc_"):
-        bot_id = cmd.split('_')[1]
-        new_share_job[user_id]['bot_id'] = bot_id
-        
-        await query.message.edit_text("<i>Loading channels...</i>")
         chans = await db.get_user_channels(user_id)
         if not chans:
-            return await query.message.edit_text("<b>❌ No channels added in /settings.</b>")
+            return await bot.send_message(user_id, "<b>❌ No channels added in /settings.</b>", reply_markup=ReplyKeyboardRemove())
             
-        btns = []
-        for c in chans:
-            btns.append([InlineKeyboardButton(c['title'], callback_data=f"sl#src_{c['chat_id']}")])
-        btns.append([InlineKeyboardButton("❌ Cancel", callback_data="back")])
-        
-        await query.message.edit_text(
-            "<b>❪ STEP 2: SOURCE DATABASE ❫</b>\n\nWhere are the files stored securely?",
-            reply_markup=InlineKeyboardMarkup(btns)
+        ch_kb = [[f"📢 {ch['title']}"] for ch in chans]
+        ch_kb.append(["❌ Cancel"])
+        msg = await _ask(bot, user_id, 
+            "<b>❪ STEP 2: SOURCE DATABASE ❫</b>\n\nWhere are the files stored securely?", 
+            reply_markup=ReplyKeyboardMarkup(ch_kb, resize_keyboard=True, one_time_keyboard=True)
         )
-
-    elif cmd.startswith("src_"):
-        src_id = int(cmd.split('_')[1])
-        new_share_job[user_id]['source'] = src_id
+        if not msg.text or msg.text == "/cancel" or "Cancel" in msg.text:
+            return await bot.send_message(user_id, "<b>Cancelled.</b>", reply_markup=ReplyKeyboardRemove())
+            
+        title = msg.text.replace("📢 ", "").strip()
+        ch = next((c for c in chans if c["title"] == title), None)
+        if not ch:
+            return await bot.send_message(user_id, "<b>❌ Source Channel not found.</b>", reply_markup=ReplyKeyboardRemove())
+        new_share_job[user_id]['source'] = int(ch['chat_id'])
         
-        chans = await db.get_user_channels(user_id)
-        btns = []
-        for c in chans:
-            btns.append([InlineKeyboardButton(c['title'], callback_data=f"sl#tgt_{c['chat_id']}")])
-        btns.append([InlineKeyboardButton("❌ Cancel", callback_data="back")])
-        
-        await query.message.edit_text(
-            "<b>❪ STEP 3: TARGET PUBLIC CHANNEL ❫</b>\n\nWhere should I post the Share Links?",
-            reply_markup=InlineKeyboardMarkup(btns)
+        msg = await _ask(bot, user_id, 
+            "<b>❪ STEP 3: TARGET PUBLIC CHANNEL ❫</b>\n\nWhere should I post the Share Links?", 
+            reply_markup=ReplyKeyboardMarkup(ch_kb, resize_keyboard=True, one_time_keyboard=True)
         )
+        if not msg.text or msg.text == "/cancel" or "Cancel" in msg.text:
+            return await bot.send_message(user_id, "<b>Cancelled.</b>", reply_markup=ReplyKeyboardRemove())
+            
+        title = msg.text.replace("📢 ", "").strip()
+        ch = next((c for c in chans if c["title"] == title), None)
+        if not ch:
+            return await bot.send_message(user_id, "<b>❌ Target Channel not found.</b>", reply_markup=ReplyKeyboardRemove())
+        new_share_job[user_id]['target'] = int(ch['chat_id'])
 
-    elif cmd.startswith("tgt_"):
-        tgt_id = int(cmd.split('_')[1])
-        new_share_job[user_id]['target'] = tgt_id
-        
-        await query.message.delete()
-        
-        # Ranges
-        try:
-            markup = ReplyKeyboardMarkup([[KeyboardButton("/cancel")]], resize_keyboard=True, one_time_keyboard=True)
+        markup = ReplyKeyboardMarkup([[KeyboardButton("/cancel")]], resize_keyboard=True, one_time_keyboard=True)
             
-            def parse_id(text: str) -> int:
-                text = text.strip().rstrip('/')
-                if text.isdigit(): return int(text)
-                if "t.me/" in text:
-                    parts = text.split('/')
-                    if parts[-1].isdigit(): return int(parts[-1])
-                raise ValueError("Invalid Message ID or Link")
-                
-            # ── Step 4: Story Name ──────────────────────────────────────────────────
-            msg_story = await _ask(bot, user_id, 
-                "<b>❪ STEP 4: STORY NAME ❫</b>\n\nEnter the clean name of the Series/Story (e.g. <code>TDMB</code>):", 
-                reply_markup=markup
-            )
-            if msg_story.text == "/cancel": return await msg_story.reply("Cancelled.", reply_markup=ReplyKeyboardRemove())
-            new_share_job[user_id]['story'] = msg_story.text.strip()
+        def parse_id(text: str) -> int:
+            text = text.strip().rstrip('/')
+            if text.isdigit(): return int(text)
+            if "t.me/" in text:
+                parts = text.split('/')
+                if parts[-1].isdigit(): return int(parts[-1])
+            raise ValueError("Invalid Message ID or Link")
             
-            # ── Step 5: Start ID / Link ───────────────────────────────────────────────
-            msg_start = await _ask(bot, user_id, 
-                "<b>❪ STEP 5: START MESSAGE ❫</b>\n\nForward the first message, send its Message ID, or paste its Link (e.g. <code>https://t.me/c/123/456</code>):", 
-                reply_markup=markup
-            )
-            if msg_start.text == "/cancel": return await msg_start.reply("Cancelled.", reply_markup=ReplyKeyboardRemove())
-            start_id = parse_id(msg_start.text)
+        msg_story = await _ask(bot, user_id, 
+            "<b>❪ STEP 4: STORY NAME ❫</b>\n\nEnter the clean name of the Series/Story (e.g. <code>TDMB</code>):", 
+            reply_markup=markup
+        )
+        if msg_story.text == "/cancel": return await bot.send_message(user_id, "Cancelled.", reply_markup=ReplyKeyboardRemove())
+        new_share_job[user_id]['story'] = msg_story.text.strip()
+        
+        msg_start = await _ask(bot, user_id, 
+            "<b>❪ STEP 5: START MESSAGE ❫</b>\n\nForward the first message, send its Message ID, or paste its Link (e.g. <code>https://t.me/c/123/456</code>):", 
+            reply_markup=markup
+        )
+        if msg_start.text == "/cancel": return await bot.send_message(user_id, "Cancelled.", reply_markup=ReplyKeyboardRemove())
+        start_id = parse_id(msg_start.text)
+        new_share_job[user_id]['start_id'] = start_id
+        
+        msg_end = await _ask(bot, user_id, 
+            "<b>❪ STEP 6: LAST MESSAGE ❫</b>\n\nForward the last message, send its Msg ID, or paste its Link:", 
+            reply_markup=markup
+        )
+        if msg_end.text == "/cancel": return await bot.send_message(user_id, "Cancelled.", reply_markup=ReplyKeyboardRemove())
+        end_id = parse_id(msg_end.text)
+        new_share_job[user_id]['end_id'] = end_id
+        
+        if start_id > end_id:
+            start_id, end_id = end_id, start_id
             new_share_job[user_id]['start_id'] = start_id
-            
-            # ── Step 6: End ID / Link   ───────────────────────────────────────────────
-            msg_end = await _ask(bot, user_id, 
-                "<b>❪ STEP 6: LAST MESSAGE ❫</b>\n\nForward the last message, send its Msg ID, or paste its Link:", 
-                reply_markup=markup
-            )
-            if msg_end.text == "/cancel": return await msg_end.reply("Cancelled.", reply_markup=ReplyKeyboardRemove())
-            end_id = parse_id(msg_end.text)
             new_share_job[user_id]['end_id'] = end_id
             
-            if start_id > end_id:
-                start_id, end_id = end_id, start_id
-                new_share_job[user_id]['start_id'] = start_id
-                new_share_job[user_id]['end_id'] = end_id
-            
-            # ── Step 7: Batch Size ──────────────────────────────────────────────────
-            msg_batch = await _ask(bot, user_id, 
-                "<b>❪ STEP 7: EPISODES PER LINK ❫</b>\n\nHow many files should be grouped in one link button?\nExample: <code>20</code>", 
-                reply_markup=markup
-            )
-            if msg_batch.text == "/cancel": return await msg_batch.reply("Cancelled.", reply_markup=ReplyKeyboardRemove())
-            
-            batch_size = int(msg_batch.text.strip())
-            if batch_size < 1: batch_size = 20
-            new_share_job[user_id]['batch_size'] = batch_size
-            
-            sj = new_share_job[user_id]
-            total_msgs = (sj['end_id'] - sj['start_id']) + 1
-            total_links = math.ceil(total_msgs / sj['batch_size'])
-            total_posts = math.ceil(total_links / 10) # 10 buttons per post
-            
-            btn = [[InlineKeyboardButton("🚀 Generate & Group Links", callback_data="sl#build")]]
-            await bot.send_message(
-                user_id,
-                f"<b>📋 CONFIRM SHARE BATCH</b>\n\n"
-                f"<b>Story Name:</b> {sj['story']}\n"
-                f"<b>Source ID:</b> <code>{sj['source']}</code>\n"
-                f"<b>Target ID:</b> <code>{sj['target']}</code>\n"
-                f"<b>Range:</b> {sj['start_id']} to {sj['end_id']} ({total_msgs} files)\n"
-                f"<b>Batch Size:</b> {sj['batch_size']} files per link\n"
-                f"<b>Total Buttons to create:</b> {total_links}\n"
-                f"<b>Total Grouped Posts (10 btns each):</b> {total_posts}\n",
-                reply_markup=InlineKeyboardMarkup(btn)
-            )
-        except Exception as e:
-            await bot.send_message(user_id, f"<b>Error parsing input:</b> {e}", reply_markup=ReplyKeyboardRemove())
+        msg_batch = await _ask(bot, user_id, 
+            "<b>❪ STEP 7: EPISODES PER LINK ❫</b>\n\nHow many files should be grouped in one link button?\nExample: <code>20</code>", 
+            reply_markup=markup
+        )
+        if msg_batch.text == "/cancel": return await bot.send_message(user_id, "Cancelled.", reply_markup=ReplyKeyboardRemove())
+        
+        batch_size = int(msg_batch.text.strip())
+        if batch_size < 1: batch_size = 20
+        new_share_job[user_id]['batch_size'] = batch_size
+        
+        sj = new_share_job[user_id]
+        total_msgs = (sj['end_id'] - sj['start_id']) + 1
+        total_links = math.ceil(total_msgs / sj['batch_size'])
+        total_posts = math.ceil(total_links / 10)
+        
+        btn = [[InlineKeyboardButton("🚀 Generate & Group Links", callback_data="sl#build")]]
+        await bot.send_message(
+            user_id,
+            f"<b>📋 CONFIRM SHARE BATCH</b>\n\n"
+            f"<b>Story Name:</b> {sj['story']}\n"
+            f"<b>Source ID:</b> <code>{sj['source']}</code>\n"
+            f"<b>Target ID:</b> <code>{sj['target']}</code>\n"
+            f"<b>Range:</b> {sj['start_id']} to {sj['end_id']} ({total_msgs} files)\n"
+            f"<b>Batch Size:</b> {sj['batch_size']} files per link\n"
+            f"<b>Total Buttons to create:</b> {total_links}\n"
+            f"<b>Total Grouped Posts (10 btns each):</b> {total_posts}\n",
+            reply_markup=InlineKeyboardMarkup(btn)
+        )
+    except Exception as e:
+        await bot.send_message(user_id, f"<b>Error during link setup:</b> {e}", reply_markup=ReplyKeyboardRemove())
 
+@Client.on_callback_query(filters.regex(r'^sl#'))
+async def sl_callback(bot, query):
+        await query.message.delete()
+        asyncio.create_task(_create_share_flow(bot, user_id))
 
     elif cmd == "build":
         sj = new_share_job.get(user_id)
