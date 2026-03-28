@@ -25,7 +25,25 @@ class Database:
         self.nfy = self.db.notify
         self.chl = self.db.channels
         self.stats = self.db.global_stats
+        self.share_links = self.db.share_links
         
+    async def set_share_bot_token(self, token: str):
+        await self.stats.update_one({'_id': 'share_bot'}, {'$set': {'token': token}}, upsert=True)
+
+    async def get_share_bot_token(self):
+        doc = await self.stats.find_one({'_id': 'share_bot'})
+        return doc.get('token') if doc else None
+
+    async def save_share_link(self, uuid_str: str, message_ids: list, source_chat):
+        doc = {
+            '_id': uuid_str,
+            'message_ids': message_ids,
+            'source_chat': source_chat
+        }
+        await self.share_links.update_one({'_id': uuid_str}, {'$set': doc}, upsert=True)
+
+    async def get_share_link(self, uuid_str: str):
+        return await self.share_links.find_one({'_id': uuid_str})
     async def get_global_stats(self):
         import time
         doc = await self.stats.find_one({'_id': 'bot_stats'})

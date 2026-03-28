@@ -120,6 +120,12 @@ async def main():
     bot = Bot()
     await bot.start()
 
+    try:
+        from plugins.share_bot import start_share_bot
+        await start_share_bot()
+    except Exception as e:
+        logging.error(f"Failed to init share bot: {e}")
+
     # Start web server
     await web_server()
 
@@ -130,6 +136,10 @@ async def main():
     asyncio.create_task(stats_tracker())
 
     await idle()
+    try:
+        from plugins.share_bot import share_client
+        if share_client: await share_client.stop()
+    except Exception: pass
     await bot.stop()
 
 if __name__ == "__main__":

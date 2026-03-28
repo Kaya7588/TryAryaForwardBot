@@ -181,48 +181,37 @@ async def pub_(bot, message):
           
           seq_counter = 0
           smart_order = data.get('smart_order', True)
-          # SMART ORDER: batch size is 10 — large enough to catch most source mismatches
-          SORT_WINDOW = 30 if smart_order else 1
+          # SMART ORDER: Buffer up to 500 messages to sort accurately via NLP
+          limit_val = int(sts.get('limit') or 1)
+          SORT_WINDOW = min(limit_val, 500) if smart_order else 1
           sort_buffer = []
-
-          def _human_sort_key(item):
-              msg = item[0]
-              text = getattr(msg.text, 'html', '') if msg.text else ''
-              if msg.caption:
-                  text += f" {getattr(msg.caption, 'html', msg.caption)}"
-              media = getattr(msg, 'audio', None) or getattr(msg, 'video', None) or getattr(msg, 'document', None)
-              if media and getattr(media, 'file_name', None):
-                  text += f" {media.file_name}"
-              
-              if not text:
-                  return (0.0, msg.id)
-                  
-              text = text.lower()
-              import re
-              # Strip heavy resolutions to prevent false number detection
-              text = re.sub(r'\b(720[p]?|1080[p]?|480[p]?|360[p]?|4k|1440[p]?|2160[p]?|aac|hevc|x264|x265)\b', '', text)
-              
-              # S01E05 style
-              m = re.search(r's\d+[ex](\d+(?:\.\d+)?)', text)
-              if m: return (float(m.group(1)), msg.id)
-              
-              # Ep 5, Part 5, Ch 5 style
-              m = re.search(r'(?:ep|episode|part|ch|chapter|no|#)[^\d]*(\d+(?:\.\d+)?)', text)
-              if m: return (float(m.group(1)), msg.id)
-              
-              # Fallback: exact last standalone block of numbers
-              numbers = re.findall(r'\b(\d+(?:\.\d+)?)\b', text)
-              if numbers: return (float(numbers[-1]), msg.id)
-              
-              return (0.0, msg.id)
           
           async def flush_buffer():
               nonlocal seq_counter, sort_buffer
               if not sort_buffer: return
               
               if smart_order:
-                  # Advanced Human AI sorting overrides Telegram sequence ID
-                  sort_buffer.sort(key=_human_sort_key)
+                  import re
+                  def _smart_sort_key(item):
+                      msg = item[0]
+                      media_obj = getattr(msg, msg.media.value if msg.media else '', None) if msg.media else None
+                      filename = getattr(media_obj, 'file_name', '') if media_obj else ''
+                      caption = msg.caption or getattr(msg.text, 'html', str(msg.text)) if msg.text else ''
+                      
+                      search_txt = f"{filename} {caption}".lower()
+                      
+                      # Heuristic 1: Explicit markers (Ep, Part, Chapter)
+                      m1 = re.search(r'(?:ep|episode|part|ch|chapter|e)\s*[-_:]?\s*0*(\d+)', search_txt)
+                      if m1: return (0, int(m1.group(1)), msg.id)
+                      
+                      # Heuristic 2: Trailing numerics isolated in filename
+                      m2 = re.findall(r'(?<!\d)0*(\d+)(?!\d)', str(filename))
+                      if m2: return (1, int(m2[-1]), msg.id)
+                      
+                      # Fallback
+                      return (2, msg.id, msg.id)
+                      
+                  sort_buffer.sort(key=_smart_sort_key)
               
               for message, forward_tag, new_caption, protect, download_mode, sleep in sort_buffer:
                   sts.add('fetched')

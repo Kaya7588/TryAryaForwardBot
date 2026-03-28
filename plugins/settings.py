@@ -146,6 +146,42 @@ async def settings_query(bot, query):
      buttons = [[InlineKeyboardButton('↩ Back to Accounts', callback_data="settings#accounts")]]
      await query.message.edit_text("<b>Successfully changed active account.</b>", reply_markup=InlineKeyboardMarkup(buttons))
 
+  elif type == "sharebot":
+     token = await db.get_share_bot_token()
+     buttons = [
+         [InlineKeyboardButton('✏️ Set / Update Token', callback_data='settings#editsharebot')],
+         [InlineKeyboardButton('↩ Back', callback_data='settings#main')]
+     ]
+     txt = f"<b>🔗 File-Sharing Bot Setup</b>\n\n<b>Current Token:</b>\n<code>{token or '❌ Not Set'}</code>\n\nAdd a separate Bot Token here to handle deep-link batch requests automatically. This bot will securely deliver your hidden Database files to users in DM."
+     await query.message.edit_text(txt, reply_markup=InlineKeyboardMarkup(buttons))
+
+  elif type == "editsharebot":
+     await query.message.delete()
+     try:
+         txtmsg = await bot.send_message(user_id, "<b>Send the Bot Token for the File-Sharing Bot:</b>\n<i>(Get it from @BotFather)</i>\n\n/cancel to abort")
+         resp = await bot.listen(chat_id=user_id, timeout=120)
+         if resp.text == "/cancel":
+             await resp.delete()
+             return await txtmsg.edit_text("<b>Cancelled.</b>", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩ Back', callback_data='settings#sharebot')]]))
+         new_token = resp.text.strip()
+         if ":" not in new_token:
+             return await txtmsg.edit_text("<b>Invalid Token Format.</b>", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩ Back', callback_data='settings#sharebot')]]))
+         
+         await db.set_share_bot_token(new_token)
+         # Start immediately
+         try:
+             from plugins.share_bot import start_share_bot
+             await start_share_bot(new_token)
+             status = "✅ Successfully Saved & Started!"
+         except Exception as e:
+             status = f"✅ Saved securely, but failed to start stream:\n<code>{e}</code>"
+             
+         await resp.delete()
+         await txtmsg.edit_text(status, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩ Back', callback_data='settings#sharebot')]]))
+     except asyncio.exceptions.TimeoutError:
+         try: await txtmsg.edit_text('Timeout.', reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩ Back', callback_data='settings#sharebot')]]))
+         except: pass
+
   elif type.startswith("removebot"):
      if "_" in type:
          bot_id = type.split('_')[1]
@@ -605,6 +641,8 @@ async def main_buttons(user_id=None):
                         callback_data='mg#audio_list'),
            InlineKeyboardButton('🎬 Vɪᴅᴇᴏ Mᴇʀɢᴇ',
                         callback_data='mg#video_list')
+           InlineKeyboardButton('🔗 Sʜᴀʀᴇ Bᴏᴛ sᴇᴛᴜᴘ',
+                        callback_data='settings#sharebot')
            ],[
            InlineKeyboardButton('⫷ Bᴀᴄᴋ', callback_data='back')
            ]]
@@ -636,6 +674,9 @@ async def main_buttons(user_id=None):
            ],[
            InlineKeyboardButton('🌐 Language / भाषा',
                         callback_data='settings#lang')
+           ],[
+           InlineKeyboardButton('🔗 Sʜᴀʀᴇ ʟɪɴᴋ Bᴏᴛ sᴇᴛᴜᴘ',
+                        callback_data='settings#sharebot')
            ],[
            InlineKeyboardButton('⫷ Bᴀᴄᴋ', callback_data='back')
            ]]
