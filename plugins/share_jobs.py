@@ -154,6 +154,11 @@ async def _create_share_flow(bot, user_id):
 
 @Client.on_callback_query(filters.regex(r'^sl#'))
 async def sl_callback(bot, query):
+    user_id = query.from_user.id
+    data = query.data.split('#')
+    cmd = data[1]
+
+    if cmd == "start":
         await query.message.delete()
         asyncio.create_task(_create_share_flow(bot, user_id))
 
