@@ -641,6 +641,7 @@ async def main_buttons(user_id=None):
                         callback_data='mg#audio_list'),
            InlineKeyboardButton('🎬 Vɪᴅᴇᴏ Mᴇʀɢᴇ',
                         callback_data='mg#video_list')
+           ],[
            InlineKeyboardButton('🔗 Sʜᴀʀᴇ Bᴏᴛ sᴇᴛᴜᴘ',
                         callback_data='settings#sharebot')
            ],[
