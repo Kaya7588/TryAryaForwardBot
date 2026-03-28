@@ -213,10 +213,17 @@ async def _build_share_links(bot, user_id, sj, info_msg):
         await safe_edit("<i>⏳ Hydrating session cache and scanning database...</i>")
         
         # 🚨 CRITICAL FIX: Force Pyrogram to learn the access_hash of the private channels.
-        # In-memory sessions or newly restarted bots do not magically know `-100x` channels unless they fetch dialogs.
+        # In-memory sessions or bots do not magically know `-100x` channels unless they receive an update.
+        # Wake-Up Broadcast: The main bot pings the DB channel, natively hydrating the worker's cache!
         try:
-            async for _ in worker.get_dialogs(limit=50): pass
-        except Exception: pass
+            ping = await bot.send_message(sj['source'], "🔄 Synchronizing...")
+            await asyncio.sleep(1.5)  # Telegram broadcasts this to the worker
+            await ping.delete()
+        except Exception as e:
+            print("Wake-Up Broadcast failed:", e)
+            
+        protect = await db.get_share_protect(user_id)
+        auto_del = await db.get_share_autodelete(user_id)
         
         current_id = sj['start_id']
         end_ep = sj['end_id']
@@ -237,7 +244,7 @@ async def _build_share_links(bot, user_id, sj, info_msg):
             
             if valid_ids:
                 uuid_str = str(uuid.uuid4()).replace('-', '')[:16]
-                await db.save_share_link(uuid_str, valid_ids, sj['source'])
+                await db.save_share_link(uuid_str, valid_ids, sj['source'], protect, auto_del)
                 
                 url = f"https://t.me/{bot_usr}?start={uuid_str}"
                 # Format e.g., "1–20"

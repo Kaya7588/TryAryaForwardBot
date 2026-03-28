@@ -148,12 +148,44 @@ async def settings_query(bot, query):
 
   elif type == "sharebot":
      token = await db.get_share_bot_token()
+     protect = await db.get_share_protect(user_id)
+     auto_delete = await db.get_share_autodelete(user_id)
+     
+     ptxt = "✅ ON" if protect else "❌ OFF"
+     
+     if auto_delete == 0:
+         adtxt = "❌ OFF"
+     elif auto_delete < 60:
+         adtxt = f"⏱ {auto_delete} mins"
+     else:
+         adtxt = f"⏱ {auto_delete // 60} hours"
+
      buttons = [
+         [InlineKeyboardButton(f'🛡 Protection: {ptxt}', callback_data='settings#sharebotprotect')],
+         [InlineKeyboardButton(f'⏱ Auto-Delete: {adtxt}', callback_data='settings#sharebotautodel')],
          [InlineKeyboardButton('✏️ Set / Update Token', callback_data='settings#editsharebot')],
          [InlineKeyboardButton('↩ Back', callback_data='settings#main')]
      ]
-     txt = f"<b>🔗 File-Sharing Bot Setup</b>\n\n<b>Current Token:</b>\n<code>{token or '❌ Not Set'}</code>\n\nAdd a separate Bot Token here to handle deep-link batch requests automatically. This bot will securely deliver your hidden Database files to users in DM."
+     txt = f"<b>🔗 File-Sharing Bots Setup</b>\n\n<b>Current Token:</b>\n<code>{token or '❌ Not Set'}</code>\n\nConfigure your delivery agent below. This bot securely delivers your hidden Database files to users in DM.\n\n<b>Protection:</b> Restricts saving & forwarding.\n<b>Auto-Delete:</b> Deletes delivered files after time completes."
      await query.message.edit_text(txt, reply_markup=InlineKeyboardMarkup(buttons))
+
+  elif type == "sharebotprotect":
+     protect = await db.get_share_protect(user_id)
+     await db.set_share_protect(user_id, not protect)
+     await query.answer(f"Protection turned {'OFF' if protect else 'ON'}")
+     return await edit_settings(client, query, "sharebot")
+
+  elif type == "sharebotautodel":
+     # Cycle autodelete: 0 (Off) -> 5 mins -> 30 mins -> 60 mins -> 1440 mins (24h) -> 0
+     current = await db.get_share_autodelete(user_id)
+     if current == 0:       nxt = 5
+     elif current == 5:     nxt = 30
+     elif current == 30:    nxt = 60
+     elif current == 60:    nxt = 1440
+     else:                  nxt = 0
+     await db.set_share_autodelete(user_id, nxt)
+     await query.answer("Auto-Delete Timer Updated!")
+     return await edit_settings(client, query, "sharebot")
 
   elif type == "editsharebot":
      await query.message.delete()

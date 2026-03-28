@@ -25,20 +25,44 @@ async def is_subscribed(client, user_id):
         logger.error(f"FSub check error in Share Bot: {e}")
         return True
 
+async def delete_later(client, chat_id, msg_ids, text_msg_id, secs: int):
+    await asyncio.sleep(secs)
+    try:
+        # Delete the delivered files
+        await client.delete_messages(chat_id, msg_ids)
+        # Delete the indicator text message
+        await client.delete_messages(chat_id, text_msg_id)
+    except Exception as e:
+        logger.error(f"Auto-delete failed: {e}")
+
 async def process_start(client, message):
     user_id = message.from_user.id
     if len(message.command) < 2:
-        return await message.reply_text("<b>Welcome to the Share Bot!</b>\nI securely deliver files.")
+        return await message.reply_text("<b>Hello! 👋</b>\n\nI am the secure delivery agent for this service.\nSend me a valid URL to receive your files.")
 
     uuid_str = message.command[1]
     
-    # 1. Check FSub
+    # 1. Fetch Link from DB (Do this first so we know if it's protecting/auto-deleting)
+    link_data = await db.get_share_link(uuid_str)
+    if not link_data:
+        return await message.reply_text("<b>❌ Link Expired or Invalid.</b>\n\nThe batch has been deleted or never existed.")
+
+    msg_ids = link_data.get('message_ids', [])
+    source_chat = link_data.get('source_chat')
+    protect_flag = link_data.get('protect', True)
+    auto_delete_mins = link_data.get('auto_delete', 0)
+
+    if not msg_ids or not source_chat:
+        return await message.reply_text("<b>❌ Database error: Missing file references.</b>")
+
+    # 2. Check FSub (Force Sub)
     if Config.FSUB_ID:
         is_sub = await is_subscribed(client, user_id)
         if not is_sub:
             try:
                 invite_link = await client.export_chat_invite_link(Config.FSUB_ID)
-                btn = [[InlineKeyboardButton("Join Channel 📢", url=invite_link)]]
+                btn = [[InlineKeyboardButton("Join Channel 📢", url=invite_link)],
+                       [InlineKeyboardButton("Try Again 🔄", url=f"https://t.me/{client.me.username}?start={uuid_str}")]]
                 return await message.reply_text(
                     "<b>🔒 Access Denied!</b>\n\nYou must join our backup channel to receive these files.",
                     reply_markup=InlineKeyboardMarkup(btn)
@@ -46,30 +70,27 @@ async def process_start(client, message):
             except Exception as e:
                 logger.error(f"Failed to generate FSub link: {e}")
 
-    # 2. Fetch Link from DB
-    link_data = await db.get_share_link(uuid_str)
-    if not link_data:
-        return await message.reply_text("<b>❌ Link Expired or Invalid.</b>")
-
-    msg_ids = link_data.get('message_ids', [])
-    source_chat = link_data.get('source_chat')
-
-    if not msg_ids or not source_chat:
-        return await message.reply_text("<b>❌ Database error: Missing files.</b>")
-
+    # 3. Deliver Messages
     sts = await message.reply_text("<i>⏳ Fetching files securely...</i>")
     
-    # 3. Deliver Messages
     try:
-        # Since Share Bot is a dedicated Pyrogram Client, we use it directly to copy.
-        # Ensure Share Bot itself is an Admin in the Private Source Channel!
-        await client.copy_messages(
+        # Delivery Agent directly copies the files!
+        sent_msgs = await client.copy_messages(
             chat_id=user_id,
             from_chat_id=source_chat,
             message_ids=msg_ids,
-            protect_content=True
+            protect_content=protect_flag
         )
-        await sts.delete()
+        
+        # Prepare success text
+        del_note = f"\n\n<i>⏱ These files will auto-delete in {auto_delete_mins} minutes.</i>" if auto_delete_mins > 0 else ""
+        text_msg = await sts.edit_text(f"<b>✅ Successfully delivered {len(sent_msgs)} files!</b>{del_note}")
+        
+        # Schedule Auto-Delete if configured
+        if auto_delete_mins > 0:
+            sent_ids = [m.id for m in sent_msgs]
+            asyncio.create_task(delete_later(client, user_id, sent_ids, text_msg.id, auto_delete_mins * 60))
+            
     except Exception as e:
         await sts.edit_text(f"<b>❌ Error delivering files:</b>\n<code>{e}</code>\n\n(Make sure this File-Sharing bot is an admin in the hidden Database Channel!)")
 

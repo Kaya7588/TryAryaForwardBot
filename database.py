@@ -34,16 +34,33 @@ class Database:
         doc = await self.stats.find_one({'_id': 'share_bot'})
         return doc.get('token') if doc else None
 
-    async def save_share_link(self, uuid_str: str, message_ids: list, source_chat):
+    async def set_share_protect(self, user_id: int, protect: bool):
+        await self.col.update_one({'_id': user_id}, {'$set': {'share_protect': protect}}, upsert=True)
+
+    async def get_share_protect(self, user_id: int) -> bool:
+        doc = await self.col.find_one({'_id': user_id})
+        return doc.get('share_protect', True) if doc else True
+
+    async def set_share_autodelete(self, user_id: int, minutes: int):
+        await self.col.update_one({'_id': user_id}, {'$set': {'share_autodelete': minutes}}, upsert=True)
+
+    async def get_share_autodelete(self, user_id: int) -> int:
+        doc = await self.col.find_one({'_id': user_id})
+        return doc.get('share_autodelete', 0) if doc else 0
+
+    async def save_share_link(self, uuid_str: str, message_ids: list, source_chat, protect: bool = True, auto_delete: int = 0):
         doc = {
             '_id': uuid_str,
             'message_ids': message_ids,
-            'source_chat': source_chat
+            'source_chat': source_chat,
+            'protect': protect,
+            'auto_delete': auto_delete
         }
         await self.share_links.update_one({'_id': uuid_str}, {'$set': doc}, upsert=True)
 
     async def get_share_link(self, uuid_str: str):
         return await self.share_links.find_one({'_id': uuid_str})
+        
     async def get_global_stats(self):
         import time
         doc = await self.stats.find_one({'_id': 'bot_stats'})
