@@ -302,6 +302,10 @@ def _ffprobe_duration(fp):
     except:
         return 0.0
 
+def _get_duration(fp):
+    """Alias for _ffprobe_duration for consistency."""
+    return _ffprobe_duration(fp)
+
 
 def _build_atempo_chain(speed):
     """Build FFmpeg atempo filter chain for speed (0.5x – 2.5x)."""
@@ -372,9 +376,12 @@ def _ffmpeg_merge(file_list, output_path, metadata=None, mtype="audio", cover=No
 
                 # ══ Step 1: Merge audio only to get the EXACT real duration ══
                 tmp_audio = output_path + ".tmp_audio.m4a"
-                audio_cmd = ["ffmpeg","-y","-threads","1","-f","concat","-safe","0","-i",lst]
-                if atempo: audio_cmd += ["-af", atempo]
-                audio_cmd += ["-vn","-c:a","aac","-b:a","192k", tmp_audio]
+                audio_cmd = ["ffmpeg","-y","-threads","1"]
+                for p in file_list: audio_cmd += ["-i", os.path.abspath(p)]
+                fc = "".join(f"[{i}:a]" for i in range(len(file_list))) + f"concat=n={len(file_list)}:v=0:a=1[a1]"
+                if atempo: fc += f";[a1]{atempo}[a2]"
+                map_lbl = "[a2]" if atempo else "[a1]"
+                audio_cmd += ["-filter_complex", fc, "-map", map_lbl, "-vn","-c:a","aac","-b:a","192k", tmp_audio]
                 r_audio = subprocess.run(audio_cmd, capture_output=True, text=True, timeout=7200)
                 if r_audio.returncode != 0 or not os.path.exists(tmp_audio):
                     return False, "Audio merge failed: " + r_audio.stderr[-400:]
@@ -471,34 +478,45 @@ def _ffmpeg_merge(file_list, output_path, metadata=None, mtype="audio", cover=No
             cmd2 += ["-loop", "1", "-framerate", "1", "-i", os.path.abspath(eff_cover)] if (make_video and eff_cover and os.path.exists(eff_cover) and mtype == "audio") else []
 
         if make_video and eff_cover and os.path.exists(eff_cover) and mtype == "audio" and not outro_cover:
-            cmd2 += ["-f","concat","-safe","0","-i",lst]
-            if atempo: cmd2 += ["-af", atempo]
+            for p in file_list: cmd2 += ["-i", os.path.abspath(p)]
+            fc = "".join(f"[{i+1}:a]" for i in range(len(file_list))) + f"concat=n={len(file_list)}:v=0:a=1[a1]"
+            if atempo: fc += f";[a1]{atempo}[a2]"
+            map_albl = "[a2]" if atempo else "[a1]"
+            fc += ";[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=yuv420p[v1]"
+            cmd2 += ["-filter_complex", fc, "-map", "[v1]", "-map", map_albl]
             # CRITICAL: -movflags +faststart is REQUIRED for YouTube to be able to process the file.
             cmd2 += [
                 "-c:v","libx264","-preset","superfast","-tune","stillimage",
                 "-c:a","aac","-b:a","192k",
-                "-vf","scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
                 "-movflags","+faststart",
-                "-shortest","-max_muxing_queue_size","1024"
+                "-shortest","-max_muxing_queue_size","2048"
             ]
         else:
-            cmd2 += ["-f","concat","-safe","0","-i",lst]
-            if cover and os.path.exists(cover) and mtype == "audio" and not make_video:
-                cmd2 += ["-i", os.path.abspath(cover)]
             if mtype == "video":
+                cmd2 += ["-f","concat","-safe","0","-i",lst]
                 vf = f"setpts={1.0/speed:.4f}*PTS" if abs(speed - 1.0) > 0.001 else ""
                 if vf: cmd2 += ["-vf", vf]
                 if atempo: cmd2 += ["-af", atempo]
                 cmd2 += ["-c:v","libx264","-preset","superfast","-crf","28",
-                         "-c:a","aac","-b:a","128k","-movflags","+faststart","-max_muxing_queue_size","1024"]
+                         "-c:a","aac","-b:a","128k","-movflags","+faststart","-max_muxing_queue_size","2048"]
             else:
-                if atempo: cmd2 += ["-af", atempo]
-                cmd2 += ["-c:a","libmp3lame","-b:a","192k","-ar","48000","-max_muxing_queue_size","1024"]
+                for p in file_list: cmd2 += ["-i", os.path.abspath(p)]
+                fc = "".join(f"[{i}:a]" for i in range(len(file_list))) + f"concat=n={len(file_list)}:v=0:a=1[a1]"
+                if atempo: fc += f";[a1]{atempo}[a2]"
+                map_lbl = "[a2]" if atempo else "[a1]"
+                
                 if cover and os.path.exists(cover) and not make_video:
-                    cmd2 += ["-map","0:a","-map","1:0",
+                    cmd2 += ["-i", os.path.abspath(cover)]
+                    cov_idx = len(file_list)
+                    cmd2 += ["-filter_complex", fc, "-map", map_lbl, "-map", f"{cov_idx}:v",
                              "-id3v2_version","3",
                              "-metadata:s:v","title=Album cover",
                              "-metadata:s:v","comment=Cover (front)"]
+                else:
+                    cmd2 += ["-filter_complex", fc, "-map", map_lbl]
+                    
+                cmd2 += ["-c:a","libmp3lame","-b:a","192k","-ar","48000","-max_muxing_queue_size","2048"]
+        
         if metadata:
             for k, v in (metadata or {}).items():
                 if v: cmd2 += ["-metadata", f"{k}={v}"]
@@ -1480,6 +1498,48 @@ async def _create_flow(bot, uid, mtype="audio"):
             return await bot.send_message(uid, "<b>Cancelled.</b>")
         out_name = re.sub(r'[<>:"/\\|?*]', '_', msg.text.strip())
 
+        # Scan files for total size and duration
+        scan_msg = None
+        try: scan_msg = await bot.send_message(uid, "<i>Scanning source messages (calculating duration and size)...</i>")
+        except: pass
+        tot_bytes = 0
+        tot_secs = 0
+        valid_count = 0
+        try:
+            ch_id = int(from_chat) if str(from_chat).lstrip("-").isdigit() else from_chat
+            msg_ids = list(range(sid, eid + 1))
+            for i in range(0, len(msg_ids), 200):
+                chunk = msg_ids[i:i + 200]
+                msgs = await bot.get_messages(ch_id, chunk)
+                if not isinstance(msgs, list): msgs = [msgs]
+                for m_ in msgs:
+                    if not m_ or m_.empty: continue
+                    media_obj = None
+                    for attr in ('audio', 'video', 'document', 'voice', 'video_note'):
+                        media_obj = getattr(m_, attr, None)
+                        if media_obj: break
+                    if media_obj:
+                        tot_bytes += getattr(media_obj, 'file_size', 0) or 0
+                        dur = getattr(media_obj, 'duration', 0) or 0
+                        tot_secs += dur
+                        valid_count += 1
+            if scan_msg: await scan_msg.delete()
+        except Exception as e:
+            if scan_msg:
+                try: await scan_msg.edit_text(f"<i>Scan partial/failed: {e}</i>")
+                except: pass
+
+        units = ["B", "KB", "MB", "GB", "TB"]
+        size_f = float(tot_bytes)
+        idx = 0
+        while size_f >= 1024.0 and idx < len(units)-1:
+            idx += 1; size_f /= 1024.0
+        size_str = f"{size_f:.2f} {units[idx]}"
+        
+        mins, secs = divmod(int(tot_secs), 60)
+        hrs, mins = divmod(mins, 60)
+        dur_str = f"{hrs:02d}:{mins:02d}:{secs:02d}"
+
         # Step 5b: Speed
         speed_kb = [
             ["1.0x (Normal)", "1.25x", "1.5x"],
@@ -1487,7 +1547,11 @@ async def _create_flow(bot, uid, mtype="audio"):
             ["0.75x (Slower)", "0.5x (Slowest)"]
         ]
         msg = await _mg_ask(bot, uid,
-            "<b>Step 5b/9:</b> Choose <b>playback speed</b>:",
+            f"<b>Step 5b/9:</b> Choose <b>playback speed</b>:\n\n"
+            f"<b>Found:</b> {valid_count} valid media files\n"
+            f"<b>Total Size:</b> {size_str}\n"
+            f"<b>Total Duration:</b> {dur_str}\n\n"
+            f"<i>Select a speed below:</i>",
             reply_markup=ReplyKeyboardMarkup(speed_kb, resize_keyboard=True, one_time_keyboard=True))
         speed = 1.0
         if msg.text:
@@ -1496,6 +1560,11 @@ async def _create_flow(bot, uid, mtype="audio"):
                 try: speed = float(m.group(1))
                 except: speed = 1.0
         speed = max(0.5, min(speed, 2.5))
+        
+        fin_secs = int(tot_secs / speed) if speed > 0 else int(tot_secs)
+        fmins, fsecs = divmod(fin_secs, 60)
+        fhrs, fmins = divmod(fmins, 60)
+        fin_dur_str = f"{fhrs:02d}:{fmins:02d}:{fsecs:02d}"
 
         # Step 6: Metadata
         msg = await _mg_ask(bot, uid,
@@ -1653,6 +1722,7 @@ async def _create_flow(bot, uid, mtype="audio"):
             f"<b>Output:</b> <code>{out_name}</code>\n"
             f"<b>Type:</b> {icon} {label}\n"
             f"<b>Speed:</b> {speed}x\n"
+            f"<b>Total Duration:</b> {dur_str} (Final: {fin_dur_str})\n"
             f"<b>Audio Cover:</b> {'✅' if cover_path else '❌'}\n"
             f"<b>Make MP4 Video:</b> {'✅' if make_video else '❌'}\n"
             f"<b>Video Image:</b> {vc_label}\n"
