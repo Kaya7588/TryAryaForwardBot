@@ -106,33 +106,57 @@ async def process_start(client, message):
             )
             return
 
-    # 3. Deliver files
+    # 3. Inject DB channel into Share Bot's in-memory peer cache using the stored access_hash
+    access_hash = link_data.get('access_hash', 0)
+    if access_hash and source_chat < 0:
+        try:
+            from pyrogram.raw.types import InputPeerChannel as _IPC
+            raw_channel_id = abs(source_chat) - 1000000000000
+            await client.storage.update_peers([
+                (raw_channel_id, access_hash, "channel", None, None)
+            ])
+        except Exception as peer_err:
+            logger.warning(f"Peer injection failed (non-fatal): {peer_err}")
+
+    # 4. Deliver files one by one — copy_message (singular) is guaranteed in Pyrogram 2.x
     sts = await message.reply_text("<i>⏳ Fetching your files securely, please wait...</i>")
 
+    sent_ids = []
+    fail_count = 0
     try:
-        sent_msgs = await client.copy_messages(
-            chat_id=user_id,
-            from_chat_id=source_chat,
-            message_ids=msg_ids,
-            protect_content=protect_flag
-        )
+        for msg_id in msg_ids:
+            try:
+                sent = await client.copy_message(
+                    chat_id=user_id,
+                    from_chat_id=source_chat,
+                    message_id=msg_id,
+                    protect_content=protect_flag
+                )
+                sent_ids.append(sent.id)
+            except Exception as copy_err:
+                logger.warning(f"Failed to copy msg {msg_id}: {copy_err}")
+                fail_count += 1
 
-        total = len(sent_msgs) if isinstance(sent_msgs, list) else 1
+        total = len(sent_ids)
+        if total == 0:
+            await sts.edit_text(
+                "<b>❌ Delivery Failed</b>\n\n"
+                "Could not copy any files. Ensure the Share Bot is an admin in the Database Channel."
+            )
+            return
 
         if auto_delete_mins > 0:
             hrs = auto_delete_mins // 60
-            mins = auto_delete_mins % 60
-            if hrs:
-                del_str = f"{hrs}h {mins}m" if mins else f"{hrs}h"
-            else:
-                del_str = f"{mins} minutes"
+            mins_r = auto_delete_mins % 60
+            del_str = f"{hrs}h {mins_r}m" if hrs and mins_r else (f"{hrs}h" if hrs else f"{auto_delete_mins}m")
+
             notice = await sts.edit_text(
                 f"<b>✅ {total} file(s) delivered!</b>\n\n"
-                f"<i>⚠️ These files will auto-delete in <b>{del_str}</b>. "
-                f"Save them before they disappear!</i>"
+                f"<i>⚠️ These files will <b>auto-delete</b> in <b>{del_str}</b>. Save them!</i>"
+                + (f"\n<i>({fail_count} file(s) skipped)</i>" if fail_count else "")
             )
-            sent_ids = [m.id for m in sent_msgs] if isinstance(sent_msgs, list) else [sent_msgs.id]
             asyncio.create_task(delete_later(client, user_id, sent_ids, notice.id, auto_delete_mins * 60))
+
         else:
             await sts.edit_text(f"<b>✅ {total} file(s) delivered successfully!</b>")
 

@@ -251,6 +251,19 @@ async def _build_share_links(bot, user_id, sj, info_msg):
                 f"The Main Bot (@{(await bot.get_me()).username}) must be an admin in the hidden database channel."
             )
 
+        # Inject TARGET CHANNEL peer into poster so userbots don't get CHANNEL_INVALID
+        target_chat_id = sj['target']
+        try:
+            from pyrogram.raw.types import InputPeerChannel as _IPC
+            _tpeer = await bot.resolve_peer(target_chat_id)
+            if isinstance(_tpeer, _IPC):
+                await poster.storage.update_peers([(_tpeer.channel_id, _tpeer.access_hash, 'channel', None, None)])
+        except Exception:
+            pass  # non-fatal
+
+        # Save db channel access_hash for delivery-time peer injection in the Share Bot
+        db_access_hash = db_peer.access_hash if hasattr(db_peer, 'access_hash') else 0
+
         protect  = await db.get_share_protect(user_id)
         auto_del = await db.get_share_autodelete(user_id)
 
@@ -317,7 +330,7 @@ async def _build_share_links(bot, user_id, sj, info_msg):
                 ep_end   = ep_counter + len(valid_ids) - 1
 
                 uuid_str = str(uuid.uuid4()).replace('-', '')[:16]
-                await db.save_share_link(uuid_str, valid_ids, source_chat_id, protect, auto_del)
+                await db.save_share_link(uuid_str, valid_ids, source_chat_id, protect, auto_del, access_hash=db_access_hash)
 
                 url = f"https://t.me/{bot_usr}?start={uuid_str}"
 
@@ -396,5 +409,6 @@ async def _build_share_links(bot, user_id, sj, info_msg):
     finally:
         if user_id in new_share_job:
             del new_share_job[user_id]
+
 
 

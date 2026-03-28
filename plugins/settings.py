@@ -152,13 +152,15 @@ async def settings_query(bot, query):
      auto_delete = await db.get_share_autodelete(user_id)
      
      ptxt = "✅ ON" if protect else "❌ OFF"
-     
+
      if auto_delete == 0:
          adtxt = "❌ OFF"
      elif auto_delete < 60:
-         adtxt = f"⏱ {auto_delete} mins"
+         adtxt = f"⏱ {auto_delete}m"
+     elif auto_delete < 1440:
+         adtxt = f"⏱ {auto_delete // 60}h"
      else:
-         adtxt = f"⏱ {auto_delete // 60} hours"
+         adtxt = f"⏱ {auto_delete // 60}h"
 
      buttons = [
          [InlineKeyboardButton(f'🛡 Protection: {ptxt}', callback_data='settings#sharebotprotect')],
@@ -179,10 +181,7 @@ async def settings_query(bot, query):
      # Cycle autodelete: 0 (Off) -> 5 mins -> 30 mins -> 60 mins -> 1440 mins (24h) -> 0
      current = await db.get_share_autodelete(user_id)
      if current == 0:       nxt = 5
-     elif current == 5:     nxt = 30
-     elif current == 30:    nxt = 60
-     elif current == 60:    nxt = 1440
-     else:                  nxt = 0
+     elif current == 5:     nxt = 15`r`n      elif current == 15:   nxt = 180`r`n      elif current == 180:  nxt = 360`r`n      elif current == 360:  nxt = 720`r`n      elif current == 720:  nxt = 1440`r`n      elif current == 1440: nxt = 2880`r`n      else:                 nxt = 0
      await db.set_share_autodelete(user_id, nxt)
      await query.answer("Auto-Delete Timer Updated!")
      return await edit_settings(client, query, "sharebot")
@@ -894,3 +893,4 @@ async def next_filters_buttons(user_id):
        ]]
   return InlineKeyboardMarkup(buttons) 
    
+

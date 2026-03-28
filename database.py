@@ -48,13 +48,14 @@ class Database:
         doc = await self.col.find_one({'_id': user_id})
         return doc.get('share_autodelete', 0) if doc else 0
 
-    async def save_share_link(self, uuid_str: str, message_ids: list, source_chat, protect: bool = True, auto_delete: int = 0):
+    async def save_share_link(self, uuid_str: str, message_ids: list, source_chat, protect: bool = True, auto_delete: int = 0, access_hash: int = 0):
         doc = {
             '_id': uuid_str,
             'message_ids': message_ids,
             'source_chat': source_chat,
             'protect': protect,
-            'auto_delete': auto_delete
+            'auto_delete': auto_delete,
+            'access_hash': access_hash,
         }
         await self.share_links.update_one({'_id': uuid_str}, {'$set': doc}, upsert=True)
 
