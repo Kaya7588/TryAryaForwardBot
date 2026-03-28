@@ -212,15 +212,20 @@ async def _build_share_links(bot, user_id, sj, info_msg):
 
         await safe_edit("<i>⏳ Hydrating session cache and scanning database...</i>")
         
-        # 🚨 CRITICAL FIX: Force Pyrogram to learn the access_hash of the private channels.
-        # In-memory sessions or bots do not magically know `-100x` channels unless they receive an update.
-        # Wake-Up Broadcast: The main bot pings the DB channel, natively hydrating the worker's cache!
+        # 🚨 CRITICAL BUG REMEDIATION: Force Pyrogram Worker to organically learn the access_hash.
+        # This replaces the failed Wake-Up Broadcast by manually caching the peer into the worker's storage!
         try:
-            ping = await bot.send_message(sj['source'], "🔄 Synchronizing...")
-            await asyncio.sleep(1.5)  # Telegram broadcasts this to the worker
-            await ping.delete()
+            peer = await bot.resolve_peer(sj['source'])
+            # peer is an InputPeerChannel natively fetched by the MAIN bot.
+            # We inject this into the worker's local storage dynamically to bypass memory amnesia.
+            await worker.storage.update_peers([
+                (peer.channel_id, peer.access_hash, "channel", None, None)
+            ])
+            # If userbot, fetch dialogs gently anyway just in case:
+            if sj['bot_id'] != "SHAREBOT":
+                async for _ in worker.get_dialogs(limit=10): pass
         except Exception as e:
-            print("Wake-Up Broadcast failed:", e)
+            print("Peer Cache Injection Failed:", e)
             
         protect = await db.get_share_protect(user_id)
         auto_del = await db.get_share_autodelete(user_id)
@@ -237,7 +242,11 @@ async def _build_share_links(bot, user_id, sj, info_msg):
             msg_ids = list(range(current_id, chunk_end + 1))
             
             valid_ids = []
-            messages = await worker.get_messages(sj['source'], msg_ids)
+            
+            # 🚨 BUG FIX: Force the primary MAIN Bot to scan the DB Channel!
+            # The worker might fail due to lack of admin privileges, causing [400 CHANNEL_INVALID]
+            # during link generation. The Main Bot NEVER fails since it initiated the job!
+            messages = await bot.get_messages(sj['source'], msg_ids)
             for m in messages:
                 if m.empty or m.service: continue
                 valid_ids.append(m.id)
