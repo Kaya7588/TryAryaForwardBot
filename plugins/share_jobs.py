@@ -282,10 +282,9 @@ async def _build_share_links(bot, user_id, sj, info_msg):
                     f"<i>Make sure the Main Bot is an admin in the database channel.</i>"
                 )
 
-            # Filter out empty/service messages
-            valid_ids = [m.id for m in messages if hasattr(m, 'id') and not getattr(m, 'deleted', False) and m.id > 0 and m.QUALNAME if hasattr(m, 'QUALNAME') else m]
 
-            # More robust filter: only keep actual media/document/text messages
+            # Keep only real messages (skip MessageEmpty, MessageService)
+
             valid_ids = []
             for m in messages:
                 # Raw Pyrogram message types: Message (has content), MessageEmpty, MessageService
