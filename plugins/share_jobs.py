@@ -200,9 +200,17 @@ async def _build_share_links(bot, user_id, sj, info_msg):
             worker = await start_clone_bot(_CLIENT.client(bot_info))
             
         if not worker:
-            return await sts.edit_text("❌ Failed to start worker account.")
+            return await bot.send_message(user_id, "❌ Failed to start worker account.")
 
-        await sts.edit_text("<i>⏳ Hydrating session cache and scanning database...</i>")
+        async def safe_edit(text):
+            try:
+                await sts.edit_text(text)
+            except Exception:
+                try:
+                    await bot.send_message(user_id, text)
+                except Exception: pass
+
+        await safe_edit("<i>⏳ Hydrating session cache and scanning database...</i>")
         
         # 🚨 CRITICAL FIX: Force Pyrogram to learn the access_hash of the private channels.
         # In-memory sessions or newly restarted bots do not magically know `-100x` channels unless they fetch dialogs.
@@ -276,10 +284,13 @@ async def _build_share_links(bot, user_id, sj, info_msg):
             post_count += 1
             await asyncio.sleep(1)
             
-        await sts.edit_text(f"<b>✅ Completed!</b>\n\nGenerated ({post_count}) structured posts containing {len(raw_buttons)} protected links mapped to @{bot_usr}.")
+        await safe_edit(f"<b>✅ Completed!</b>\n\nGenerated ({post_count}) structured posts containing {len(raw_buttons)} protected links mapped to @{bot_usr}.")
         
     except Exception as e:
-        await sts.edit_text(f"<b>Error during linking:</b>\n<code>{e}</code>")
+        try:
+            await sts.edit_text(f"<b>Error during linking:</b>\n<code>{e}</code>")
+        except Exception:
+            await bot.send_message(user_id, f"<b>Error during linking:</b>\n<code>{e}</code>")
     finally:
         if user_id in new_share_job:
             del new_share_job[user_id]
