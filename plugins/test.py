@@ -34,7 +34,6 @@ async def start_clone_bot(FwdBot, data=None):
    await FwdBot.start()
    #
    async def iter_messages(
-      self, 
       chat_id: Union[int, str], 
       limit: int, 
       offset: int = 0,
@@ -47,10 +46,10 @@ async def start_clone_bot(FwdBot, data=None):
         import pyrogram
         
         # Detect if this client is a normal bot — bots CANNOT use get_chat_history (user-only API).
-        me = await self.get_me()
+        me = await FwdBot.get_me()
         is_bot = getattr(me, 'is_bot', False)
         
-        chat = await self.get_chat(chat_id)
+        chat = await FwdBot.get_chat(chat_id)
         is_channel_or_supergroup = chat.type in [
             pyrogram.enums.ChatType.CHANNEL,
             pyrogram.enums.ChatType.SUPERGROUP,
@@ -58,8 +57,8 @@ async def start_clone_bot(FwdBot, data=None):
 
         BATCH_SIZE = 200  # Max IDs per get_messages call
 
-        offset = offset if offset else getattr(self, "offset", 0)
-        limit = limit if limit else getattr(self, "limit", getattr(self, "last_msg_id", 0))
+        offset = offset if offset else getattr(FwdBot, "offset", 0)
+        limit = limit if limit else getattr(FwdBot, "limit", getattr(FwdBot, "last_msg_id", 0))
 
         BATCH_SIZE = 200
 
@@ -74,7 +73,7 @@ async def start_clone_bot(FwdBot, data=None):
                     break
                 mid = (lo + hi) // 2
                 try:
-                    probe = await self.get_messages(chat_id, [mid])
+                    probe = await FwdBot.get_messages(chat_id, [mid])
                     if not isinstance(probe, list): probe = [probe]
                     if any(m and not m.empty for m in probe):
                         lo = mid
@@ -96,27 +95,19 @@ async def start_clone_bot(FwdBot, data=None):
                 batch_ids = list(range(current, batch_end_val + 1))
                 
                 try:
-                    msgs = await self.get_messages(chat_id, batch_ids)
+                    msgs = await FwdBot.get_messages(chat_id, batch_ids)
                 except FloodWait as e:
-                    await asyncio.sleep(e.value + 1)
-                    continue
-                except Exception:
-                    msgs = []
-                    
+                    await asyncio.sleep(e.value + 2)
+                    continue 
+
                 if not isinstance(msgs, list):
                     msgs = [msgs]
+                
                 valid = []
                 for m in msgs:
                     if not m or m.empty: continue
-                    # Cross-chat filter: skip if pyrogram returned a stray message from another group
-                    if isinstance(chat_id, int) and chat_id < 0:
-                        if getattr(m, 'chat', None) and m.chat.id != chat_id:
-                            continue
-                    elif isinstance(chat_id, str) and chat_id != "me":
-                        src = chat_id.replace("@", "").lower()
-                        c_id = getattr(m, 'chat', None)
-                        if c_id and str(c_id.id) != src and (not c_id.username or c_id.username.lower() != src):
-                            continue
+                    if getattr(m, 'chat', None) and m.chat.id != chat_id:
+                        continue
                     valid.append(m)
                     
                 valid.sort(key=lambda m: m.id)
@@ -126,27 +117,34 @@ async def start_clone_bot(FwdBot, data=None):
                     
                 current = batch_end_val + 1
         else:
-            # ── New to Old: descend ──
-            current = end_id
-            while current >= start_id:
-                batch_start_val = max(start_id, current - BATCH_SIZE + 1)
+            # ── New to Old: descend (iter_messages default) ──
+            # (If offset is passed, start from there going downwards)
+            if start_id > 1:
+                # Normal descend starts from top_id
+                start_desc = end_id
+                end_desc = start_id
+            else:
+                start_desc = end_id
+                end_desc = 1
+                
+            current = start_desc
+            while current >= end_desc:
+                batch_start_val = max(current - BATCH_SIZE + 1, end_desc)
                 batch_ids = list(range(batch_start_val, current + 1))
-                batch_ids.reverse()
                 
                 try:
-                    msgs = await self.get_messages(chat_id, batch_ids)
+                    msgs = await FwdBot.get_messages(chat_id, batch_ids)
                 except FloodWait as e:
-                    await asyncio.sleep(e.value + 1)
-                    continue
-                except Exception:
-                    msgs = []
+                    await asyncio.sleep(e.value + 2)
+                    continue 
                 
                 if not isinstance(msgs, list):
                     msgs = [msgs]
+                    
                 valid = []
                 for m in msgs:
                     if not m or m.empty: continue
-                    if isinstance(chat_id, int) and chat_id < 0:
+                    if isinstance(chat_id, int):
                         if getattr(m, 'chat', None) and m.chat.id != chat_id:
                             continue
                     elif isinstance(chat_id, str) and chat_id != "me":

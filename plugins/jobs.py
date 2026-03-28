@@ -96,14 +96,6 @@ def _passes_filters(msg, disabled_types: list) -> bool:
     if msg.empty or msg.service:
         return False
     
-    if 'links' in disabled_types:
-        import re
-        text = msg.text or msg.caption or ""
-        has_link = bool(text and re.search(r'(https?://\S+|www\.\S+|t\.me/\S+)', text, flags=re.IGNORECASE))
-        # Only skip pure TEXT-only messages that are nothing but a link.
-        # Media files always pass through — the link will be stripped from their caption in _forward_message.
-        if has_link and not msg.media:
-            return False
 
     checks = [
         ('text',      lambda m: m.text and not m.media),
@@ -435,7 +427,7 @@ async def _run_job(job_id: str, user_id: int):
                 configs        = await db.get_configs(user_id)
                 filters_dict   = configs.get('filters', {})
                 remove_caption = filters_dict.get('rm_caption', False)
-                remove_links   = filters_dict.get('links', False)
+                remove_links   = 'links' in disabled_types
                 cap_tpl        = configs.get('caption')
                 forward_tag    = configs.get('forward_tag', False)
                 sleep_secs     = max(1, int(configs.get('duration', 1) or 1))
@@ -585,7 +577,7 @@ async def _run_job(job_id: str, user_id: int):
             configs        = await db.get_configs(user_id)
             filters_dict   = configs.get('filters', {})
             remove_caption = filters_dict.get('rm_caption', False)
-            remove_links   = filters_dict.get('links', False)
+            remove_links   = 'links' in disabled_types
             cap_tpl        = configs.get('caption')
             forward_tag    = configs.get('forward_tag', False)
             replacements   = configs.get('replacements', {})

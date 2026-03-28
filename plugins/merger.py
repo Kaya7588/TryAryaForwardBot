@@ -393,10 +393,10 @@ def _ffmpeg_merge(file_list, output_path, metadata=None, mtype="audio", cover=No
                 # ══ Step 2: Evenly space 4 outros across the audio duration ══
                 # Each outro is 5 seconds; place them at 25%, 50%, 75%, and 95% marks
                 outro_positions = [
-                    max(0, real_dur * 0.25),
-                    max(0, real_dur * 0.50),
-                    max(0, real_dur * 0.75),
-                    max(0, real_dur * 0.95 - 5),
+                    max(0.0, real_dur * 0.25),
+                    max(0.0, real_dur * 0.50),
+                    max(0.0, real_dur * 0.75),
+                    max(0.0, real_dur * 0.95 - 5),
                 ]
 
                 # ══ Step 3: Build overlay filter chain ══
@@ -1508,9 +1508,14 @@ async def _create_flow(bot, uid, mtype="audio"):
         try:
             ch_id = int(from_chat) if str(from_chat).lstrip("-").isdigit() else from_chat
             msg_ids = list(range(sid, eid + 1))
+            
+            # Start UI clone bot for scan so we don't hit Pyrogram channel invalid error 
+            from .test import _CLIENT, start_clone_bot
+            ui_client = await start_clone_bot(_CLIENT.client(acc))
+            
             for i in range(0, len(msg_ids), 200):
                 chunk = msg_ids[i:i + 200]
-                msgs = await bot.get_messages(ch_id, chunk)
+                msgs = await ui_client.get_messages(ch_id, chunk)
                 if not isinstance(msgs, list): msgs = [msgs]
                 for m_ in msgs:
                     if not m_ or m_.empty: continue

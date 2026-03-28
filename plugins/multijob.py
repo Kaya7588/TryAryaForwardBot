@@ -118,14 +118,6 @@ def _passes_filters(msg, disabled_types: list) -> bool:
     if msg.empty or msg.service:
         return False
 
-    # 'links' filter: only block pure text messages that contain links.
-    # Media messages with links in caption always pass through (links stripped at send time).
-    if 'links' in disabled_types:
-        import re as _re
-        _text = getattr(msg, 'text', None) or getattr(msg, 'caption', None) or ''
-        _has_link = bool(_text and _re.search(r'(https?://\S+|www\.\S+|t\.me/\S+)', str(_text), flags=_re.IGNORECASE))
-        if _has_link and not msg.media:
-            return False
 
     checks = [
         ('text',      lambda m: m.text and not m.media),

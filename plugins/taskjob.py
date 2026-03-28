@@ -141,14 +141,6 @@ def _msg_in_topic(msg, from_thread_id: int) -> bool:
 def _passes_filters(msg, disabled_types: list) -> bool:
     if msg.empty or msg.service:
         return False
-    if 'links' in disabled_types:
-        import re
-        text = msg.text or msg.caption or ""
-        has_link = bool(text and re.search(r'(https?://\S+|www\.\S+|t\.me/\S+)', text, flags=re.IGNORECASE))
-        # Only drop pure text-only messages that contain links.
-        # Media messages always pass through — links get stripped from captions during send.
-        if has_link and not msg.media:
-            return False
     checks = [
         ('text',      lambda m: m.text and not m.media),
         ('audio',     lambda m: m.audio),
@@ -356,7 +348,7 @@ async def _run_task_job(job_id: str, user_id: int):
             configs        = await db.get_configs(user_id)
             filters_dict   = configs.get('filters', {})
             remove_caption = filters_dict.get('rm_caption', False)
-            remove_links   = filters_dict.get('links', False)
+            remove_links   = 'links' in disabled_types
             cap_tpl        = configs.get('caption')
             forward_tag    = configs.get('forward_tag', False)
             sleep_secs     = max(1, configs.get('duration', 1) or 1)
