@@ -1515,7 +1515,6 @@ async def _create_flow(bot, uid, mtype="audio"):
             msg_ids = list(range(sid, eid + 1))
             
             # Start UI clone bot for scan so we don't hit Pyrogram channel invalid error 
-            from .test import _CLIENT, start_clone_bot
             ui_client = await start_clone_bot(_CLIENT.client(acc))
             
             for i in range(0, len(msg_ids), 200):
