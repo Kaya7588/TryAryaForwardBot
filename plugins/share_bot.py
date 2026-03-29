@@ -58,14 +58,19 @@ async def check_all_subscriptions(client, user_id: int, fsub_channels: list) -> 
         if not chat_id:
             continue
         try:
+            # Resolve the peer first (in_memory bot has empty cache)
+            try:
+                await client.get_chat(int(chat_id))
+            except Exception:
+                pass  # peer may already be cached or will be resolved inside get_chat_member
             member = await client.get_chat_member(int(chat_id), user_id)
             if member.status in (enums.ChatMemberStatus.LEFT, enums.ChatMemberStatus.BANNED):
                 not_joined.append(ch)
         except UserNotParticipant:
             not_joined.append(ch)
         except Exception as e:
-            logger.error(f"FSub check error for {chat_id}: {e}")
-            not_joined.append(ch)  # fail-secure
+            logger.warning(f"FSub check skipped for {chat_id} (bot may not be admin there): {e}")
+            # Do NOT block user if we can't check — only block on confirmed non-member
     return not_joined
 
 
@@ -173,7 +178,7 @@ async def _process_start(client, message):
     sts = await message.reply_text(
         "<i>⏳ Fetching your files securely, please wait...</i>",
         reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_dl_{uuid_str}")
+            InlineKeyboardButton("Cᴀɴᴄᴇʟ", callback_data=f"cancel_dl_{uuid_str}")
         ]])
     )
 
@@ -185,7 +190,7 @@ async def _process_start(client, message):
     try:
         for msg_id in msg_ids:
             if dl_id not in active_downloads:
-                await sts.edit_text("<b>🚫 Download Cancelled.</b>")
+                # Cancel handler already edited the status message — just exit silently
                 return
             try:
                 kwargs = {
@@ -230,11 +235,8 @@ async def _process_start(client, message):
                 txt = format_msg(custom_del, message.from_user).replace("{time}", del_str)
             else:
                 txt = (
-                    f"<b>✅ {total} file(s) delivered!</b>\n\n"
-                    f"⚠️ <b>Important:</b>\n"
-                    f"Listen from here only. Due to copyright, content will auto-delete after {del_str}.\n"
-                    f"If episodes get auto-deleted, repeat the same process — just click 'Try Again' once."
-                    f"{fail_note}"
+                    f"<i>⚠️ Important: {total} file(s) delivered! Due to copyright, all messages will auto-delete after {del_str}. "
+                    f"If your episodes get deleted, simply click the same link button again — you only need to do it once.{fail_note}</i>"
                 )
             notice = await message.reply_text(txt)
             asyncio.create_task(
