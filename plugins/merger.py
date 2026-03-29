@@ -336,14 +336,20 @@ async def _ffmpeg_merge(file_list, output_path, metadata=None, mtype="audio", co
         stderr_lines = []
         async def _reader():
             while True:
-                line = await proc.stderr.readline()
-                if not line: break
-                lstr = line.decode('utf-8', errors='replace')
+                try:
+                    chunk = await proc.stderr.read(4096)
+                except Exception:
+                    break
+                if not chunk: break
+                lstr = chunk.decode('utf-8', errors='replace')
                 stderr_lines.append(lstr)
+                # Keep memory minimal
+                if len(stderr_lines) > 20: stderr_lines.pop(0)
                 if progress_cb:
-                    m = re.search(r'time=(\d+):(\d+):(\d+\.\d+)', lstr)
-                    if m:
-                        h, m_m, s = float(m.group(1)), float(m.group(2)), float(m.group(3))
+                    matches = re.findall(r'time=(\d+):(\d+):(\d+\.\d+)', lstr)
+                    if matches:
+                        # matches[-1] gives the latest time tuple (HH, MM, SS.ms) in this chunk
+                        h, m_m, s = float(matches[-1][0]), float(matches[-1][1]), float(matches[-1][2])
                         await progress_cb(h*3600 + m_m*60 + s)
         try:
             await asyncio.wait_for(asyncio.gather(proc.wait(), _reader()), timeout=timeout_sec)

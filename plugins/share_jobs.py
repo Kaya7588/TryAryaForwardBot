@@ -621,23 +621,42 @@ async def _build_share_links(bot, user_id, sj, info_msg):
                 if mids and mids[0] == msg.id:
                     buckets.append((ep_s, ep_e, [msg.id]))
         else:
-            # Individual mode: fixed-size buckets
-            # IMPORTANT: Only episodes that actually fall within b_s..b_e go in that bucket.
-            # The bucket boundaries are FIXED by batch_size math — no episodes slip across.
-            bucket_map: dict = {}  # b_s -> list_of_msg_ids
-            for ep in all_ep_nums:
-                b_s = ((ep - 1) // batch_size) * batch_size + 1
-                b_e = b_s + batch_size - 1
-                if b_s not in bucket_map:
-                    bucket_map[b_s] = (b_e, [])
-                for mid in ep_to_msgs[ep]:
-                    if mid not in bucket_map[b_s][1]:
-                        bucket_map[b_s][1].append(mid)
+            # Individual mode: dynamic-size buckets
+            # If a grouped file spans beyond the fixed bucket boundary, the bucket dynamically expands
+            # to contain the whole file cleanly without duplicating it into separate buttons.
+            msg_to_end = {}
+            for msg_obj, ep_s, ep_e, is_r in parsed_msgs:
+                msg_to_end[msg_obj.id] = max(ep_e, msg_to_end.get(msg_obj.id, ep_e))
 
-            # Build sorted buckets list
-            for b_s in sorted(bucket_map.keys()):
-                b_e_raw, mids = bucket_map[b_s]
-                buckets.append([b_s, b_e_raw, mids])
+            b_s = None
+            b_e = None
+            b_mids = []
+            
+            for ep in all_ep_nums:
+                # Initialize first bucket
+                if b_s is None:
+                    math_start = ((ep - 1) // batch_size) * batch_size + 1
+                    b_s = max(ep, math_start)
+                    b_e = math_start + batch_size - 1
+
+                # If episode falls completely outside the bucket's expanding reach, flush
+                if ep > b_e:
+                    buckets.append([b_s, b_e, b_mids])
+                    math_start = ((ep - 1) // batch_size) * batch_size + 1
+                    b_s = max(ep, b_e + 1, math_start)
+                    b_e = max(b_s, math_start + batch_size - 1)
+                    b_mids = []
+
+                for mid in ep_to_msgs[ep]:
+                    if mid not in b_mids:
+                        b_mids.append(mid)
+                        # Dynamically extend bucket strictly for the span of this specific file
+                        span_e = msg_to_end.get(mid, ep)
+                        if span_e > b_e:
+                            b_e = span_e
+
+            if b_s is not None:
+                buckets.append([b_s, b_e, b_mids])
 
             # Cap ONLY last bucket label at actual last ep (cosmetic only)
             if buckets:
