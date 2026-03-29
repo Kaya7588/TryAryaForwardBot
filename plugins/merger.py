@@ -454,7 +454,7 @@ async def _ffmpeg_merge(file_list, output_path, metadata=None, mtype="audio", co
                 full_filter = f"{vf_complex}"
 
                 # Build input list: cover + 4 outro images + audio
-                cmd2 = ["ffmpeg","-y","-threads","1"]
+                cmd2 = ["ffmpeg","-y"]
                 cmd2 += ["-loop","1","-framerate","1","-t",str(real_dur),"-i", os.path.abspath(eff_cover)]
                 for op in valid_outros:
                     cmd2 += ["-loop","1","-framerate","1","-t","5","-i", os.path.abspath(op)]
@@ -494,7 +494,7 @@ async def _ffmpeg_merge(file_list, output_path, metadata=None, mtype="audio", co
                         if v: cmd2 += ["-metadata", f"{k}={v}"]
                 abs_output = os.path.abspath(output_path)
                 cmd2.append(abs_output)
-                v_ok, v_err = await _run_cmd(cmd2, 14400)
+                v_ok, v_err = await _run_cmd(cmd2, 86400)
                 try:
                     if os.path.exists(tmp_audio): os.remove(tmp_audio)
                 except Exception: pass
@@ -553,7 +553,7 @@ async def _ffmpeg_merge(file_list, output_path, metadata=None, mtype="audio", co
         # CRITICAL: always use the absolute path for output
         abs_output = os.path.abspath(output_path)
         cmd2.append(abs_output)
-        ok2, err2 = await _run_cmd(cmd2, 14400)
+        ok2, err2 = await _run_cmd(cmd2, 86400)
         # Verify output at its absolute path
         if ok2 and os.path.exists(abs_output) and os.path.getsize(abs_output) > 100:
             return True, ""

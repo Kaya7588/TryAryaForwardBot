@@ -343,6 +343,8 @@ async def _build_share_links(bot, user_id, sj, info_msg):
             _re.compile(r'(?i)\b\d+(?:\.\d+)?\s*(?:mb|gb|kb)\b'),
             # Track/season-episode labels like S01E05
             _re.compile(r'(?i)\b(?:track|s[0-9]{1,2}e[0-9]{1,2})(?=\s|$)'),
+            # Trailing duplicate brackets from OS/Telegram e.g., (1), (2), [3]
+            _re.compile(r'\(\s*\d+\s*\)|\[\s*\d+\s*\]'),
         ]
 
         def _clean(text: str) -> str:
@@ -391,8 +393,8 @@ async def _build_share_links(bot, user_id, sj, info_msg):
                 n = int(m.group(1))
                 if 0 < n < 5000: return (n, n, False)
 
-            # Check for multiple dash-separated numbers (e.g. 123-130-150)
-            m_dash = _re.search(r'(?<!\d)(\d{1,4}(?:\s*[-\u2013\u2014]\s*\d{1,4})+)(?!\d)', c)
+            # Check for multiple dash-separated or 'to' separated numbers (e.g. 123-130-150 or 151 to 200)
+            m_dash = _re.search(r'(?<!\d)(\d{1,4}(?:(?:\s*[-\u2013\u2014]|(?i:\s+to\s+))\s*\d{1,4})+)(?!\d)', c)
             if m_dash:
                 m_nums = [int(x) for x in _re.findall(r'\d+', m_dash.group(1))]
                 s, e = min(m_nums), max(m_nums)
