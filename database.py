@@ -77,6 +77,16 @@ class Database:
     async def set_share_fsub_channels(self, channels: list):
         await self._set_share_cfg(fsub_channels=channels)
 
+    # Customizable Texts
+    async def get_share_text(self, key: str, default: str) -> str:
+        return (await self._share_cfg()).get(key, default)
+
+    async def set_share_text(self, key: str, value: str):
+        if not value: 
+            await self.share_config.update_one({'_id': 'global'}, {'$unset': {key: ""}}, upsert=True)
+        else:
+            await self._set_share_cfg(**{key: value})
+
     # save_share_link — access_hash allows Share Bot to rebuild peer cache at delivery time
     async def save_share_link(self, uuid_str: str, message_ids: list, source_chat,
                               protect: bool = True, access_hash: int = 0):

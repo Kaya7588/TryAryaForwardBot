@@ -12,6 +12,14 @@ from pyrogram.errors import UserNotParticipant
 from database import db
 from config import Config
 
+def format_msg(text: str, user) -> str:
+    if not text: return ""
+    return text.format(
+        first_name=user.first_name or "",
+        last_name=user.last_name or "",
+        mention=user.mention
+    )
+
 logger = logging.getLogger(__name__)
 
 share_client = None  # global reference
@@ -37,8 +45,15 @@ async def check_all_subscriptions(client, user_id: int, fsub_channels: list) -> 
     not_joined = []
     for ch in fsub_channels:
         chat_id = ch.get('chat_id')
-        if not chat_id:
-            continue
+        if not chat_id: continue
+        
+        # Inject peer access_hash so Share Bot doesn't get CHANNEL_INVALID
+        ah = ch.get('access_hash', 0)
+        if ah and str(chat_id).startswith("-100"):
+            try:
+                raw_id = abs(int(chat_id)) - 1000000000000
+                await client.storage.update_peers([(raw_id, ah, "channel", None, None)])
+            except Exception: pass
         try:
             member = await client.get_chat_member(int(chat_id), user_id)
             from pyrogram import enums
@@ -83,6 +98,17 @@ async def start_share_bot(token: str = None):
 def register_share_handlers(app: Client):
     """Attach all /start handlers to the given Client instance."""
 
+    @app.on_chat_join_request()
+    async def fsub_auto_approve(client, request):
+        # Auto-Approve FSub join requests seamlessly
+        fsub_chs = await db.get_share_fsub_channels()
+        for ch in fsub_chs:
+            if str(request.chat.id) == ch.get('chat_id') and ch.get('join_request'):
+                try:
+                    await request.approve()
+                except Exception as e:
+                    logger.error(f"FSub auto-approve failed for {request.chat.id}: {e}")
+
     @app.on_message(filters.private & filters.command("start"))
     async def process_start(client, message):
         user_id = message.from_user.id
@@ -90,13 +116,17 @@ def register_share_handlers(app: Client):
 
         # Plain /start — welcome message
         if len(args) < 2:
-            bot_name = client.me.first_name
-            await message.reply_text(
-                f"<b>👋 Welcome to {bot_name}!</b>\n\n"
-                "I'm a secure file-delivery bot. Click a link button from the channel "
-                "to receive your episodes directly here in DM.\n\n"
-                "<i>If you ended up here by mistake, go back to the channel and click a button.</i>"
-            )
+            custom_wel = await db.get_share_text("welcome_msg", "")
+            if custom_wel:
+                await message.reply_text(format_msg(custom_wel, message.from_user))
+            else:
+                bot_name = client.me.first_name
+                await message.reply_text(
+                    f"<b>👋 Welcome to {bot_name}!</b>\n\n"
+                    "I'm a secure file-delivery bot. Click a link button from the channel "
+                    "to receive your episodes directly here in DM.\n\n"
+                    "<i>If you ended up here by mistake, go back to the channel and click a button.</i>"
+                )
             return
 
         uuid_str = args[1].strip()
@@ -123,28 +153,43 @@ def register_share_handlers(app: Client):
         if fsub_channels:
             not_joined = await check_all_subscriptions(client, user_id, fsub_channels)
             if not_joined:
-                buttons = []
+                # 2x2 grid for FSub buttons natively built with titles
+                from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+                
+                f_buttons = []
                 for ch in not_joined:
-                    label = "📨 Request to Join" if ch.get('join_request') else "📢 Join Channel"
+                    label = ch.get('title') or "📢 Join Channel"
+                    if ch.get('join_request'):
+                        label = f"📨 {label}"
                     invite = ch.get('invite_link', '')
                     if invite:
-                        buttons.append([InlineKeyboardButton(label, url=invite)])
+                        f_buttons.append(InlineKeyboardButton(label, url=invite))
+                        
+                # Arrange FSub buttons in rows of 2
+                buttons = []
+                for i in range(0, len(f_buttons), 2):
+                    buttons.append(f_buttons[i:i+2])
+                    
                 buttons.append([
                     InlineKeyboardButton(
                         "✅ I've Joined — Try Again!",
                         url=f"https://t.me/{client.me.username}?start={uuid_str}"
                     )
                 ])
-                ch_list = "\n".join(
-                    f"• {ch.get('title', 'Channel')} "
-                    + ("(send a join request)" if ch.get('join_request') else "")
-                    for ch in not_joined
-                )
+
+                fsub_msg = await db.get_share_text("fsub_msg", "")
+                if fsub_msg:
+                    txt = format_msg(fsub_msg, message.from_user)
+                else:
+                    txt = (
+                        f"<b>🔒 Join Required!</b>\n\n"
+                        f"Hey {message.from_user.first_name or 'User'},\n"
+                        f"Please join all my update channels to use me!\n\n"
+                        "<i>After joining, click <b>Try Again</b> below.</i>"
+                    )
+
                 await message.reply_text(
-                    f"<b>🔒 Join Required!</b>\n\n"
-                    f"You must join {len(not_joined)} channel(s) to access this content:\n\n"
-                    f"{ch_list}\n\n"
-                    "<i>After joining, click <b>Try Again</b> below.</i>",
+                    txt,
                     reply_markup=InlineKeyboardMarkup(buttons)
                 )
                 return
@@ -169,15 +214,22 @@ def register_share_handlers(app: Client):
 
         sent_ids   = []
         fail_count = 0
+        cap_tpl    = await db.get_share_text("custom_caption", "")
+        formatted_cap = format_msg(cap_tpl, message.from_user) if cap_tpl else None
+
         try:
             for msg_id in msg_ids:
                 try:
-                    sent = await client.copy_message(
-                        chat_id=user_id,
-                        from_chat_id=source_chat,
-                        message_id=msg_id,
-                        protect_content=protect_flag
-                    )
+                    kwargs = {
+                        "chat_id": user_id,
+                        "from_chat_id": source_chat,
+                        "message_id": msg_id,
+                        "protect_content": protect_flag
+                    }
+                    if formatted_cap:
+                        kwargs["caption"] = formatted_cap
+                        
+                    sent = await client.copy_message(**kwargs)
                     sent_ids.append(sent.id)
                 except Exception as copy_err:
                     logger.warning(f"Failed to copy msg {msg_id}: {copy_err}")
@@ -199,20 +251,29 @@ def register_share_handlers(app: Client):
                 mins_r= auto_delete_mins % 60
                 del_str = (f"{hrs}h {mins_r}m" if hrs and mins_r
                            else (f"{hrs} hours" if hrs else f"{auto_delete_mins} minutes"))
-                notice = await sts.edit_text(
-                    f"<b>✅ {total} file(s) delivered!</b>\n\n"
-                    f"⚠️ <b>Important:</b>\n"
-                    f"Listen from here only. Due to copyright, the content will auto-delete after {del_str}.\n"
-                    f"If your episodes get auto-deleted, then repeat the same process next time — "
-                    f"you only need to click 'Try Again' once.{fail_note}"
-                )
+                
+                custom_del = await db.get_share_text("delete_msg", "")
+                if custom_del:
+                    txt = format_msg(custom_del, message.from_user).replace("{time}", del_str)
+                else:
+                    txt = (
+                        f"<b>✅ {total} file(s) delivered!</b>\n\n"
+                        f"⚠️ <b>Important:</b>\n"
+                        f"Listen from here only. Due to copyright, the content will auto-delete after {del_str}.\n"
+                        f"If your episodes get auto-deleted, then repeat the same process next time — "
+                        f"you only need to click 'Try Again' once.{fail_note}"
+                    )
+                notice = await sts.edit_text(txt)
                 asyncio.create_task(
                     delete_later(client, user_id, sent_ids, notice.id, auto_delete_mins * 60)
                 )
             else:
-                await sts.edit_text(
-                    f"<b>✅ {total} file(s) delivered!</b>{fail_note}"
-                )
+                custom_suc = await db.get_share_text("success_msg", "")
+                if custom_suc:
+                    txt = format_msg(custom_suc, message.from_user)
+                else:
+                    txt = f"<b>✅ {total} file(s) delivered!</b>{fail_note}"
+                await sts.edit_text(txt)
 
         except Exception as e:
             await sts.edit_text(

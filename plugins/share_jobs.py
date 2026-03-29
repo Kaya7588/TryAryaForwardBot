@@ -31,18 +31,20 @@ new_share_job = {}
 async def _create_share_flow(bot, user_id):
     try:
         new_share_job[user_id] = {}
-        bots = await db.get_bots(user_id)
-        if not bots:
-            return await bot.send_message(user_id, "<b>❌ No accounts. Add one in /settings → Accounts first.</b>")
+        all_bots = await db.get_bots(user_id)
+        # ONLY show actual Bot accounts, because Userbots cannot send Share Link buttons effectively
+        bots = [b for b in all_bots if b.get('is_bot', False)]
+        share_token = await db.get_share_bot_token()
+        
+        if not bots and not share_token:
+            return await bot.send_message(user_id, "<b>❌ No Share Bots available. Please add a Bot Token in /settings (Share Bot or Accounts).</b>")
             
         kb = []
-        share_token = await db.get_share_bot_token()
         if share_token:
             kb.append(["🤖 (Dedicated) Share Bot"])
             
         for b in bots:
-            typ = "🤖" if b.get('is_bot', True) else "👤"
-            kb.append([f"{typ} {b['name']}"])
+            kb.append([f"🤖 {b['name']}"])
             
         kb.append(["❌ Cancel"])
         
@@ -286,7 +288,7 @@ async def _build_share_links(bot, user_id, sj, info_msg):
 
             for attempt in range(6):
                 try:
-                    msgs = await bot.get_messages(db_peer, msg_ids)
+                    msgs = await bot.get_messages(sj['source'], msg_ids)
                     if not isinstance(msgs, list): msgs = [msgs]
                     
                     for m in msgs:

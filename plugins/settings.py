@@ -159,20 +159,27 @@ async def settings_query(bot, query):
      else:                   adtxt = f"⏱ {auto_delete // 60}h"
 
      buttons = [
-         [InlineKeyboardButton(f'🛡 Protection: {ptxt}', callback_data='settings#sharebotprotect')],
-         [InlineKeyboardButton(f'⏱ Auto-Delete: {adtxt}', callback_data='settings#sharebotautodel')],
-         [InlineKeyboardButton(f'🗂 Buttons/Post: {bpp}', callback_data='settings#sharebot_bpp')],
-         [InlineKeyboardButton(f'📢 Force-Subscribe ({len(fsub_chs)}/6)', callback_data='settings#sharefsub')],
-         [InlineKeyboardButton('✏️ Set / Update Token', callback_data='settings#editsharebot')],
+         [InlineKeyboardButton(f'🛡 Protection: {ptxt}', callback_data='settings#sharebotprotect'),
+          InlineKeyboardButton(f'⏱ Auto-Delete: {adtxt}', callback_data='settings#sharebotautodel')],
+         [InlineKeyboardButton(f'🗂 Buttons/Post: {bpp}', callback_data='settings#sharebot_bpp'),
+          InlineKeyboardButton(f'📢 Force-Subscribe ({len(fsub_chs)}/6)', callback_data='settings#sharefsub')],
+         [InlineKeyboardButton('📖 Welcome Msg', callback_data='settings#sbt_welcome'),
+          InlineKeyboardButton('🗑 Delete Msg', callback_data='settings#sbt_delete')],
+         [InlineKeyboardButton('📝 Custom Caption', callback_data='settings#sbt_caption'),
+          InlineKeyboardButton('✅ Success Msg', callback_data='settings#sbt_success')],
+         [InlineKeyboardButton('🔐 FSub Message', callback_data='settings#sbt_fsub'),
+          InlineKeyboardButton('✏️ Set / Update Token', callback_data='settings#editsharebot')],
          [InlineKeyboardButton('↩ Back', callback_data='settings#main')]
      ]
      txt = (
-         f"<b>🔗 File-Sharing Bot Setup</b>\n\n"
-         f"<b>Token:</b> <code>{token or '❌ Not Set'}</code>\n\n"
-         f"<b>Protection</b> — restricts saving & forwarding delivered files.\n"
-         f"<b>Auto-Delete</b> — globally deletes files after the timer (applies to all links).\n"
-         f"<b>Buttons/Post</b> — how many episode buttons appear per channel post.\n"
-         f"<b>Force-Subscribe</b> — users must join specified channels before receiving files."
+         f"<b>❪ SHARE BOT CONFIGURATION ❫</b>\n\n"
+         f"<b>❯ Bot Token:</b> <code>{token or '❌ Not Set'}</code>\n\n"
+         f"<b>⚙️ Settings Overview:</b>\n"
+         f"<b>┠ Protection</b> — restricts saving & forwarding delivered files.\n"
+         f"<b>┠ Auto-Delete</b> — globally deletes files after the timer.\n"
+         f"<b>┠ Buttons/Post</b> — how many episode buttons appear in channel posts.\n"
+         f"<b>┠ Force-Subscribe</b> — users must join channels before receiving files.\n"
+         f"<b>┖ Messaging</b> — click the lower buttons to customize text & captions."
      )
      await query.message.edit_text(txt, reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -209,6 +216,42 @@ async def settings_query(bot, query):
      await db.set_share_buttons_per_post(nxt)
      await query.answer(f"Buttons per post set to {nxt}")
      return await edit_settings(client, query, "sharebot")
+
+  elif type.startswith("sbt_"):
+     key_map = {
+         "sbt_welcome": ("welcome_msg", "Welcome Message"),
+         "sbt_delete": ("delete_msg", "Delete Message"),
+         "sbt_caption": ("custom_caption", "Custom Caption"),
+         "sbt_success": ("success_msg", "Success Message"),
+         "sbt_fsub": ("fsub_msg", "FSub Message"),
+     }
+     db_key, title = key_map[type]
+     await query.message.delete()
+     try:
+         ask = await bot.send_message(
+             user_id,
+             f"<b>❪ CUSTOMIZE TEXT: {title.upper()} ❫</b>\n\n"
+             f"<b>Send the new text to be used.</b>\n"
+             f"<i>Supported variables:</i>\n"
+             f"<code>{{first_name}}</code> — User's first name\n"
+             f"<code>{{last_name}}</code> — User's last name\n"
+             f"<code>{{mention}}</code> — @username or strict ID mention\n\n"
+             "Send <code>/clear</code> to reset to default.\n"
+             "Send <code>/cancel</code> to abort."
+         )
+         resp = await bot.listen(chat_id=user_id, timeout=300)
+         if resp.text == "/cancel":
+             await resp.delete()
+             return await ask.edit_text("<b>Cancelled.</b>", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩ Back", callback_data="settings#sharebot")]]))
+         elif resp.text == "/clear":
+             await db.set_share_text(db_key, "")
+             await ask.edit_text(f"✅ <b>{title} has been reset to default!</b>", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩ Back", callback_data="settings#sharebot")]]))
+         elif resp.text:
+             await db.set_share_text(db_key, resp.text.html if getattr(resp.text, 'html', None) else resp.text)
+             await ask.edit_text(f"✅ <b>{title} successfully updated!</b>", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩ Back", callback_data="settings#sharebot")]]))
+         await resp.delete()
+     except Exception as e:
+         pass
 
   elif type == "sharefsub":
      fsub_chs = await db.get_share_fsub_channels()
@@ -257,11 +300,19 @@ async def settings_query(bot, query):
                  invite = await bot.export_chat_invite_link(ch_obj.id)
              except Exception:
                  invite = getattr(ch_obj, 'invite_link', '') or ''
+                 
+             ah = 0
+             try:
+                 peer = await bot.resolve_peer(ch_obj.id)
+                 ah = getattr(peer, 'access_hash', 0)
+             except Exception: pass
+
              fsub_chs.append({
                  'chat_id':     str(ch_obj.id),
                  'title':       ch_obj.title or ch_obj.username or str(ch_obj.id),
                  'invite_link': invite,
                  'join_request': False,
+                 'access_hash': ah,
              })
              await db.set_share_fsub_channels(fsub_chs)
              await ask.edit_text(
