@@ -540,7 +540,7 @@ async def _build_share_links(bot, user_id, sj, info_msg):
             dup_preview = ", ".join(str(e) for e in duplicate_eps[:10])
             if len(duplicate_eps) > 10:
                 dup_preview += f" (+{len(duplicate_eps)-10} more)"
-            report_lines.append(f"⚠️ <b>Duplicates skipped ({len(duplicate_eps)}):</b> {dup_preview}")
+            report_lines.append(f"⚠️ <b>Duplicates detected ({len(duplicate_eps)}) — all files kept:</b> {dup_preview}")
 
         if missing_eps and not GROUPED_MODE:
             miss_preview = ", ".join(str(e) for e in missing_eps[:15])
@@ -555,6 +555,57 @@ async def _build_share_links(bot, user_id, sj, info_msg):
         report_lines.append(f"<i>Users click any button to receive their episodes from @{bot_usr}.</i>")
 
         await safe_edit("\n".join(report_lines))
+
+        # ── SEND DOWNLOADABLE REPORT FILE ─────────────────────────────────
+        import io, datetime
+        now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5, minutes=30)))
+        plain_report = [
+            "=" * 50,
+            "  ARYA BOT  —  Share Links Generation Report",
+            "=" * 50,
+            f"Story    : {story.upper()}",
+            f"Generated: {now.strftime('%Y-%m-%d %H:%M:%S IST')}",
+            f"Bot      : @{bot_usr}",
+            "-" * 50,
+            f"Files processed      : {total_count}",
+            f"Episode range        : {first_ep_num} – {last_ep_num}",
+            f"Link buttons created : {len(raw_buttons)}",
+            f"Posts sent           : {post_count}",
+            f"Mode                 : {'Grouped (1 button/file)' if GROUPED_MODE else f'Individual (batch={batch_size})'}",
+        ]
+        if grouped_files:
+            plain_report.append("-" * 50)
+            plain_report.append(f"GROUPED FILES ({len(grouped_files)}):")
+            for gf in grouped_files:
+                plain_report.append(f"  • {gf}")
+        if duplicate_eps:
+            plain_report.append("-" * 50)
+            plain_report.append(f"DUPLICATES DETECTED — all files kept ({len(duplicate_eps)}):")
+            plain_report.append("  " + ", ".join(str(e) for e in duplicate_eps))
+        if missing_eps and not GROUPED_MODE:
+            plain_report.append("-" * 50)
+            plain_report.append(f"MISSING EPISODES ({len(missing_eps)}):")
+            plain_report.append("  " + ", ".join(str(e) for e in missing_eps))
+        if unparseable_count:
+            plain_report.append("-" * 50)
+            plain_report.append(f"UNPARSEABLE MESSAGES SKIPPED: {unparseable_count}")
+        plain_report += [
+            "=" * 50,
+            "Note: Duplicates mean multiple files had the same episode",
+            "number. ALL were included — nothing was skipped.",
+            "=" * 50,
+        ]
+        report_text = "\n".join(plain_report)
+        report_bytes = io.BytesIO(report_text.encode('utf-8'))
+        report_bytes.name = f"arya_report_{story.replace(' ','_')}.txt"
+        try:
+            await bot.send_document(
+                user_id, report_bytes,
+                caption=f"<b>📋 Full report for {story.upper()}</b>",
+                file_name=report_bytes.name
+            )
+        except Exception as rep_err:
+            logger.warning(f"Could not send report file: {rep_err}")
 
 
     except Exception as e:

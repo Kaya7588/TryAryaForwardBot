@@ -422,35 +422,46 @@ async def settings_query(bot, query):
          await resp.delete()
          try:
              ch_obj = await bot.get_chat(raw_id)
-             try:
-                 invite = await bot.export_chat_invite_link(ch_obj.id)
-             except Exception:
-                 invite = getattr(ch_obj, 'invite_link', '') or ''
-                 
-             ah = 0
-             try:
-                 peer = await bot.resolve_peer(ch_obj.id)
-                 ah = getattr(peer, 'access_hash', 0)
-             except Exception: pass
-
-             fsub_chs.append({
-                 'chat_id':     str(ch_obj.id),
-                 'title':       ch_obj.title or ch_obj.username or str(ch_obj.id),
-                 'invite_link': invite,
-                 'join_request': False,
-                 'access_hash': ah,
-             })
-             await db.set_share_fsub_channels(fsub_chs)
-             await ask.edit_text(
-                 f"✅ Added: <b>{ch_obj.title}</b>",
-                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩ Back", callback_data="settings#sharefsub")]])
-             )
          except Exception as e:
-             await ask.edit_text(
-                 f"❌ Failed to add channel: <code>{e}</code>\n"
-                 "Make sure the Main Bot is an admin in that channel.",
+             err_str = str(e).lower()
+             if "private" in err_str or "peer_id_invalid" in err_str or "channel_invalid" in err_str:
+                 msg = (
+                     "<b>❌ Cannot access this channel.</b>\n\n"
+                     "This is a <b>private channel/group</b>. Make sure:\n"
+                     "• The <b>Main Bot</b> is an <b>admin</b> in this channel\n"
+                     "• You send the ID (not @username) for private channels\n\n"
+                     "<i>Format: <code>-1001234567890</code></i>"
+                 )
+             else:
+                 msg = f"<b>❌ Error:</b> <code>{e}</code>\nMake sure the Main Bot is an admin in that channel."
+             return await ask.edit_text(
+                 msg,
                  reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩ Back", callback_data="settings#sharefsub")]])
              )
+         try:
+             invite = await bot.export_chat_invite_link(ch_obj.id)
+         except Exception:
+             invite = getattr(ch_obj, 'invite_link', '') or ''
+
+         ah = 0
+         try:
+             peer = await bot.resolve_peer(ch_obj.id)
+             ah = getattr(peer, 'access_hash', 0)
+         except Exception: pass
+
+         fsub_chs.append({
+             'chat_id':     str(ch_obj.id),
+             'title':       ch_obj.title or ch_obj.username or str(ch_obj.id),
+             'invite_link': invite,
+             'join_request': False,
+             'access_hash': ah,
+         })
+         await db.set_share_fsub_channels(fsub_chs)
+         await ask.edit_text(
+             f"<b>✅ Added: {ch_obj.title}</b>\n"
+             f"<i>Use 'Toggle JR' to enable join-request mode for this channel.</i>",
+             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩ Back", callback_data="settings#sharefsub")]])
+         )
      except asyncio.TimeoutError:
          try: await ask.edit_text("Timeout.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("↩ Back", callback_data="settings#sharefsub")]]))
          except Exception: pass
@@ -459,9 +470,20 @@ async def settings_query(bot, query):
      idx      = int(type.split("_")[-1])
      fsub_chs = await db.get_share_fsub_channels()
      if 0 <= idx < len(fsub_chs):
-         fsub_chs[idx]['join_request'] = not fsub_chs[idx].get('join_request', False)
+         new_jr = not fsub_chs[idx].get('join_request', False)
+         fsub_chs[idx]['join_request'] = new_jr
+         ch_id = fsub_chs[idx].get('chat_id')
+         if ch_id:
+             try:
+                 if new_jr:
+                     lnk_obj = await bot.create_chat_invite_link(int(ch_id), creates_join_request=True)
+                     fsub_chs[idx]['invite_link'] = lnk_obj.invite_link
+                 else:
+                     fsub_chs[idx]['invite_link'] = await bot.export_chat_invite_link(int(ch_id))
+             except Exception as lnk_err:
+                 logger.warning(f"Could not regenerate fsub invite link: {lnk_err}")
          await db.set_share_fsub_channels(fsub_chs)
-         status = "ON" if fsub_chs[idx]['join_request'] else "OFF"
+         status = "ON ✅" if new_jr else "OFF ❌"
          await query.answer(f"Join-Request mode: {status}")
      return await edit_settings(client, query, "sharefsub")
 

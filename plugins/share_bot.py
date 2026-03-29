@@ -86,15 +86,6 @@ async def check_all_subscriptions(client, user_id: int, fsub_channels: list) -> 
 # Module-level handler functions (required for add_handler to work)
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _fsub_auto_approve(client, request):
-    """Auto-approve join requests for FSub channels."""
-    fsub_chs = await db.get_share_fsub_channels()
-    for ch in fsub_chs:
-        if str(request.chat.id) == ch.get('chat_id') and ch.get('join_request'):
-            try:
-                await request.approve()
-            except Exception as e:
-                logger.error(f"FSub auto-approve failed: {e}")
 
 
 async def _process_start(client, message):
@@ -306,7 +297,7 @@ async def _process_delivery_cancel(client, query):
 
 def register_share_handlers(app: Client):
     """Register all handlers on a started Client instance."""
-    app.add_handler(ChatJoinRequestHandler(_fsub_auto_approve))
+    # Note: No ChatJoinRequestHandler — JR channels require manual admin approval.
     app.add_handler(MessageHandler(
         _process_start,
         filters.private & filters.command("start")
