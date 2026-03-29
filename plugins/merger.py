@@ -340,7 +340,12 @@ def _ffmpeg_merge(file_list, output_path, metadata=None, mtype="audio", cover=No
                 f.write(f"file '{safe}'\n")
 
         atempo = _build_atempo_chain(speed) if abs(speed - 1.0) > 0.001 else ""
-        needs_reencode = bool(atempo)
+        
+        # Audio concatenation with different formats (mp3 + m4a) must be re-encoded to prevent truncation.
+        # We enforce re-encode if it's an audio merge with multiple files, or if make_video is True.
+        # Video merges (mtype == "video") with make_video == False can safely use lossless concat demuxer.
+        needs_reencode = bool(atempo) or make_video or (mtype == "audio" and len(file_list) > 1)
+
 
         if not needs_reencode:
             # Try lossless concat copy first (only safe for audio output or pure video concat)
