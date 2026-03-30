@@ -428,19 +428,26 @@ async def settings_query(bot, query):
       if not bt: return await query.answer("Bot not found!")
 
       buttons = [
-          [InlineKeyboardButton('»  ᴡᴇʟᴄᴏᴍᴇ ᴍᴇꜱꜱᴀɢᴇ',   callback_data=f"settings#sb_set_welcome_{b_id}")],
-          [InlineKeyboardButton('🖼  ᴡᴇʟᴄᴏᴍᴇ ɪᴍᴀɢᴇ',     callback_data=f"settings#sb_set_welcome_img_{b_id}")],
-          [InlineKeyboardButton('»  ᴅᴇʟᴇᴛᴇ ᴍᴇꜱꜱᴀɢᴇ',      callback_data=f"settings#sb_set_delete_{b_id}")],
-          [InlineKeyboardButton('»  ꜱᴜᴄᴄᴇꜱꜱ ᴍᴇꜱꜱᴀɢᴇ',     callback_data=f"settings#sb_set_success_{b_id}")],
-          [InlineKeyboardButton('»  ᴄᴜꜱᴛᴏᴍ ᴄᴀᴘᴛɪᴏɴ',      callback_data=f"settings#sb_set_caption_{b_id}")],
-          [InlineKeyboardButton('‣  ᴀʙᴏᴜᴛ ꜱᴇᴄᴛɪᴏɴ',       callback_data=f"settings#sb_about_{b_id}")],
-          [InlineKeyboardButton('»  ꜰᴏʀᴄᴇ ꜱᴜʙꜱᴄʀɪʙᴇ',    callback_data=f"settings#sb_fsub_{b_id}")],
+          # ─── Welcome & About (grouped) ───────────────────────────
           [
-              InlineKeyboardButton('»  ꜱᴛᴀᴛꜱ', callback_data=f"settings#sb_stats_{b_id}"),
-              InlineKeyboardButton('»  ʙʀᴏᴀᴅᴄᴀꜱᴛ', callback_data=f"settings#sb_broadcast_{b_id}")
+              InlineKeyboardButton('»  ᴡᴇʟᴄᴏᴍᴇ ᴍꜱɢ',    callback_data=f"settings#sb_set_welcome_{b_id}"),
+              InlineKeyboardButton('🖼  ᴡᴇʟᴄᴏᴍᴇ ɪᴍɢ',    callback_data=f"settings#sb_set_welcome_img_{b_id}"),
           ],
-          [InlineKeyboardButton('‣  ʀᴇᴍᴏᴠᴇ ʙᴏᴛ ‣ ',        callback_data=f"settings#sb_remove_{b_id}")],
-          [InlineKeyboardButton('«  ʙᴀᴄᴋ',                 callback_data="settings#sbt_manage")],
+          [InlineKeyboardButton('‣  ᴀʙᴏᴜᴛ ꜱᴇᴄᴛɪᴏɴ',      callback_data=f"settings#sb_about_{b_id}")],
+          # ─── Other messages ───────────────────────────────────────
+          [
+              InlineKeyboardButton('»  ᴅᴇʟᴇᴛᴇ ᴍꜱɢ',      callback_data=f"settings#sb_set_delete_{b_id}"),
+              InlineKeyboardButton('»  ꜱᴜᴄᴄᴇꜱꜱ ᴍꜱɢ',    callback_data=f"settings#sb_set_success_{b_id}"),
+          ],
+          [InlineKeyboardButton('»  ᴄᴜꜱᴛᴏᴍ ᴄᴀᴘᴛɪᴏɴ',    callback_data=f"settings#sb_set_caption_{b_id}")],
+          # ─── Bot controls ─────────────────────────────────────────
+          [InlineKeyboardButton('»  ꜰᴏʀᴄᴇ ꜱᴜʙꜱᴄʀɪʙᴇ',  callback_data=f"settings#sb_fsub_{b_id}")],
+          [
+              InlineKeyboardButton('»  ꜱᴛᴀᴛꜱ',           callback_data=f"settings#sb_stats_{b_id}"),
+              InlineKeyboardButton('»  ʙʀᴏᴀᴅᴄᴀꜱᴛ',       callback_data=f"settings#sb_broadcast_{b_id}")
+          ],
+          [InlineKeyboardButton('‣  ʀᴇᴍᴏᴠᴇ ʙᴏᴛ ‣ ',      callback_data=f"settings#sb_remove_{b_id}")],
+          [InlineKeyboardButton('«  ʙᴀᴄᴋ',               callback_data="settings#sbt_manage")],
       ]
       await query.message.edit_text(
           f"<b>❪ SHARE BOT PROFILE ❫</b>\n\n"
@@ -457,19 +464,21 @@ async def settings_query(bot, query):
       ask = await bot.send_message(
           user_id,
           "<b>🖼 Set Welcome Image</b>\n\n"
-          "Send a photo to show alongside the welcome message.\n"
-          "When set, the welcome message will appear as a photo caption.\n\n"
-          "Send /clear to remove the current image.\n"
-          "Send /cancel to abort."
+          "Send a photo to use as the welcome banner.\n"
+          "The welcome text will appear as the photo's caption.\n\n"
+          "Send <code>/clear</code> to remove the current image.\n"
+          "Send <code>/cancel</code> to abort."
       )
       try:
           resp = await bot.listen(chat_id=user_id, timeout=120)
+
           if resp.text and resp.text.strip() == "/cancel":
               await resp.delete()
               return await ask.edit_text(
                   "Cancelled.",
                   reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("«  ʙᴀᴄᴋ", callback_data=f"settings#sb_view_{b_id}")]])
               )
+
           if resp.text and resp.text.strip() == "/clear":
               about = await db.get_share_bot_about(b_id)
               about.pop('welcome_image_id', None)
@@ -479,6 +488,7 @@ async def settings_query(bot, query):
                   "»  Welcome image removed.",
                   reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("«  ʙᴀᴄᴋ", callback_data=f"settings#sb_view_{b_id}")]])
               )
+
           photo = resp.photo
           if not photo:
               await resp.delete()
@@ -486,12 +496,41 @@ async def settings_query(bot, query):
                   "‣  No photo received. Please send an image.",
                   reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("«  ʙᴀᴄᴋ", callback_data=f"settings#sb_view_{b_id}")]])
               )
+
+          # ——————————————————————————————————————————————————————————————————————
+          # KEY FIX: file_id is bot-specific in Telegram.
+          # The photo was sent to the ARYA (admin) bot, so its file_id belongs to Arya.
+          # If the delivery bot tries to send_photo with Arya's file_id, it fails silently.
+          # Solution: ask the delivery bot's client to forward the photo to itself
+          # (its own DM/saved messages), then capture ITS OWN file_id from that message.
+          # ——————————————————————————————————————————————————————————————————————
+          from plugins.share_bot import share_clients
+          sb_client = share_clients.get(int(b_id)) if b_id.isdigit() else None
+
+          final_file_id = photo.file_id  # default: Arya bot's id (may fail in delivery bot)
+          if sb_client:
+              try:
+                  # Forward from Arya's chat to delivery bot's saved messages
+                  relay = await sb_client.send_photo(
+                      chat_id=int(b_id),  # delivery bot sends to itself = Saved Messages
+                      photo=photo.file_id,
+                  )
+                  if relay and relay.photo:
+                      final_file_id = relay.photo.file_id
+                  # Clean up relay message so Saved Messages doesn't fill up
+                  try:
+                      await relay.delete()
+                  except Exception:
+                      pass
+              except Exception as relay_err:
+                  logger.warning(f"Welcome image relay failed, using Arya's file_id: {relay_err}")
+
           about = await db.get_share_bot_about(b_id)
-          about['welcome_image_id'] = photo.file_id
+          about['welcome_image_id'] = final_file_id
           await db.set_share_bot_about(b_id, about)
           await resp.delete()
           await ask.edit_text(
-              "»  Welcome image saved! It will appear with the welcome text.",
+              "»  Welcome image saved! Users will see it with the welcome message.",
               reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("«  ʙᴀᴄᴋ", callback_data=f"settings#sb_view_{b_id}")]])
           )
       except asyncio.TimeoutError:
