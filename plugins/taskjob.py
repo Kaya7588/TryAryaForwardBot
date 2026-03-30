@@ -54,6 +54,8 @@ _pause_events: dict[str, asyncio.Event] = {}
 _waiting: dict[int, asyncio.Future] = {}
 
 
+from pyrogram import ContinuePropagation
+
 @Client.on_message(filters.private, group=-10)
 async def _taskjob_input_router(bot, message):
     """Catch all private messages and route them to any waiting _ask() futures."""
@@ -62,6 +64,7 @@ async def _taskjob_input_router(bot, message):
         fut = _waiting.pop(uid)
         if not fut.done():
             fut.set_result(message)
+    raise ContinuePropagation
 
 
 async def _ask(bot, user_id: int, text: str, reply_markup=None, timeout: int = 300):

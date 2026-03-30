@@ -44,6 +44,7 @@ async def _lj_input_router(bot, message):
         fut = _lj_waiting.pop(uid)
         if not fut.done():
             fut.set_result(message)
+    raise ContinuePropagation
 
 
 async def _ask(bot, user_id: int, text: str, reply_markup=None, timeout: int = 300):

@@ -41,6 +41,8 @@ _mj_paused: dict[str, asyncio.Event] = {}   # set=running, clear=paused
 _mj_waiting: dict[int, asyncio.Future] = {}
 
 
+from pyrogram import ContinuePropagation
+
 @Client.on_message(filters.private, group=-11)
 async def _mj_input_router(bot, message):
     """Route all private messages to any waiting _mj_ask() futures."""
@@ -49,6 +51,7 @@ async def _mj_input_router(bot, message):
         fut = _mj_waiting.pop(uid)
         if not fut.done():
             fut.set_result(message)
+    raise ContinuePropagation
 
 
 async def _mj_ask(bot, user_id: int, text: str, reply_markup=None, timeout: int = 300):
