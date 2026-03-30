@@ -263,10 +263,22 @@ def _parse_link(text):
     text = text.strip().rstrip('/')
     if text.isdigit(): return None, int(text)
     m = re.search(r'https?://t\.me/c/(\d+)(?:/\d+)?/(\d+)', text)
-    if m: return int(m.group(1)), int(m.group(2))
+    if m: return int(f"-100{m.group(1)}"), int(m.group(2))
     m = re.search(r'https?://t\.me/([^/]+)(?:/\d+)?/(\d+)', text)
     if m: return m.group(1), int(m.group(2))
     return None, None
+
+async def _safe_resolve_peer(client, chat_id):
+    try:
+        await client.get_chat(chat_id)
+    except Exception as e:
+        if "PEER_ID_INVALID" in str(e).upper() or "CHANNEL_INVALID" in str(e).upper():
+            try:
+                me = await client.get_me()
+                if not getattr(me, 'is_bot', False):
+                    async for _ in client.get_dialogs(limit=200): pass
+                await client.get_chat(chat_id)
+            except: pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -579,9 +591,16 @@ async def _ffmpeg_merge(file_list, output_path, metadata=None, mtype="audio", co
 # ══════════════════════════════════════════════════════════════════════════════
 # Pre-download size scanner
 # ══════════════════════════════════════════════════════════════════════════════
+async def _safe_resolve_peer(client, peer_id):
+    try:
+        await client.get_input_entity(peer_id)
+    except:
+        pass
+
 async def _scan_total_size(client, from_chat, start_id, end_id):
     """Scan all messages in range and return (total_size_bytes, media_count) using
     Telegram metadata only — NO file downloads."""
+    await _safe_resolve_peer(client, from_chat)
     total = 0
     count = 0
     current = start_id
@@ -664,6 +683,8 @@ async def _run_job(jid, uid, bot):
                 from_chat = uid
         except:
             pass
+
+        await _safe_resolve_peer(client, from_chat)
 
         try:
             scan_msg = await bot.send_message(uid,
@@ -828,47 +849,53 @@ async def _run_job(jid, uid, bot):
                 dlp = os.path.join(chunk_dir, seq_name)
 
                 fp = None
-                for att in range(5):
+                for att in range(10):  # increased retries
                     try:
                         fp = await client.download_media(msg, file_name=dlp)
                         if fp: break
                     except FloodWait as fw: await asyncio.sleep(fw.value + 2)
-                    except Exception:
-                        if att < 4: await asyncio.sleep(3); continue
+                    except Exception as e:
+                        if "TimeoutList" in str(e) or "Timeout" in str(e) or "Connection" in str(e):
+                            if att < 9: await asyncio.sleep(3); continue
                         break
+                
+                if not fp or not os.path.exists(fp):
+                    await _db_up(jid, status="error", error=f"Failed to download media for episode {global_seq+1} (msg {msg.id}).")
+                    try: await bot.send_message(uid, f"<b>❌ Fatal Error:</b> Could not download message {msg.id} after 10 attempts! Aborting merge to prevent gaps.")
+                    except: pass
+                    return
+                
+                fsz = os.path.getsize(fp)
+                chunk_bytes += fsz
+                dl_total_bytes += fsz
+                chunk_files.append(fp)
+                global_seq += 1
 
-                if fp and os.path.exists(fp):
-                    fsz = os.path.getsize(fp)
-                    chunk_bytes += fsz
-                    dl_total_bytes += fsz
-                    chunk_files.append(fp)
-                    global_seq += 1
+                # Log entry: timecode + original name (before speed adjustment)
+                h = int(cumulative_secs // 3600)
+                m_ = int((cumulative_secs % 3600) // 60)
+                s_ = int(cumulative_secs % 60)
+                tc = f"{h:02d}:{m_:02d}:{s_:02d}"
+                log_entries.append((tc, original_name, global_seq))
 
-                    # Log entry: timecode + original name (before speed adjustment)
-                    h = int(cumulative_secs // 3600)
-                    m_ = int((cumulative_secs % 3600) // 60)
-                    s_ = int(cumulative_secs % 60)
-                    tc = f"{h:02d}:{m_:02d}:{s_:02d}"
-                    log_entries.append((tc, original_name, global_seq))
+                # Probe duration for log
+                dur = _ffprobe_duration(fp)
+                # Apply speed factor to cumulative time
+                cumulative_secs += dur / max(speed, 0.1)
 
-                    # Probe duration for log
-                    dur = _ffprobe_duration(fp)
-                    # Apply speed factor to cumulative time
-                    cumulative_secs += dur / max(speed, 0.1)
+                await _db_up(jid, downloaded=global_seq, current_id=msg.id,
+                             total_dl_bytes=dl_total_bytes)
+                await asyncio.sleep(0.3)
 
-                    await _db_up(jid, downloaded=global_seq, current_id=msg.id,
-                                 total_dl_bytes=dl_total_bytes)
-                    await asyncio.sleep(0.3)
-
-                    # Update status every 3 files
-                    if ci % 3 == 0:
-                        pct = int((global_seq / total_files) * 100)
-                        try:
-                            txt = (f"<b>⬇️ {chunk_label} — Downloading</b>\n"
-                                   f"<code>{_bar(global_seq, total_files)}</code>\n"
-                                   f"📁 {global_seq}/{total_files} total • {_sz(dl_total_bytes)}")
-                            if status_msg: await status_msg.edit_text(txt)
-                        except: pass
+                # Update status every 3 files
+                if ci % 3 == 0:
+                    pct = int((global_seq / total_files) * 100)
+                    try:
+                        txt = (f"<b>⬇️ {chunk_label} — Downloading</b>\n"
+                               f"<code>{_bar(global_seq, total_files)}</code>\n"
+                               f"📁 {global_seq}/{total_files} total • {_sz(dl_total_bytes)}")
+                        if status_msg: await status_msg.edit_text(txt)
+                    except: pass
 
             if not chunk_files:
                 logger.warning(f"[MG {jid}] Chunk {chunk_num} had no downloadable files, skipping.")
@@ -1517,7 +1544,7 @@ async def _create_flow(bot, uid, mtype="audio"):
         ref_s, sid = _parse_link(msg.text)
         if sid is None:
             return await bot.send_message(uid, "<b>❌ Invalid link.</b>")
-        from_chat = (-1000000000000 - ref_s if isinstance(ref_s, int) else ref_s) if ref_s else None
+        from_chat = ref_s if ref_s else None
 
         # Step 3: End link
         msg = await _mg_ask(bot, uid,
@@ -1528,7 +1555,7 @@ async def _create_flow(bot, uid, mtype="audio"):
         if eid is None:
             return await bot.send_message(uid, "<b>❌ Invalid link.</b>")
         if from_chat is None and ref_e:
-            from_chat = (-1000000000000 - ref_e if isinstance(ref_e, int) else ref_e)
+            from_chat = ref_e
         if from_chat is None:
             return await bot.send_message(uid, "<b>❌ Could not detect channel.</b>")
         if sid > eid: sid, eid = eid, sid
@@ -1577,6 +1604,7 @@ async def _create_flow(bot, uid, mtype="audio"):
             
             # Start UI clone bot for scan so we don't hit Pyrogram channel invalid error 
             ui_client = await start_clone_bot(_CLIENT.client(acc))
+            await _safe_resolve_peer(ui_client, ch_id)
             
             for i in range(0, len(msg_ids), 200):
                 chunk = msg_ids[i:i + 200]
