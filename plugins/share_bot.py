@@ -52,21 +52,20 @@ def _sc(text: str) -> str:
 
 def _get_base_header(user) -> str:
     u_name = user.first_name or "User"
-    return (
-        f"›› {_sc('Hey!!')}, {u_name}\n\n"
-        f"➤ {_sc('Purpose of the bot: This bot makes renaming anime and series files easy and stress-free.')}\n\n"
-        f"‣ {_sc('Maintained by')} : {_sc('Yato')}\n"
-        f"\n"
-    )
+    last = (" " + user.last_name) if getattr(user, "last_name", None) else ""
+    return f"›› ʜᴇʏ, <a href='tg://user?id={user.id}'>{u_name}{last}</a>\n\n"
 
 def _get_welcome_text(user, bot_name, custom_wel=None) -> str:
     if custom_wel:
         return format_msg(custom_wel, user)
-    return _get_base_header(user) + _sc(
-        "I am a permanent file store bot — users can access stored messages\n"
-        "by using a shareable link created for them.\n\n"
-        "Click a link button from the channel to receive your files directly here.\n"
-        "To know more, click the Help button below."
+    return (
+        _get_base_header(user) +
+        f"<b>»  {_sc('Welcome to')} {bot_name}!</b>\n\n" +
+        _sc(
+            "I am a file delivery bot. Tap any link button from the channel "
+            "and I will send you the files directly here.\n\n"
+            "Click Help for more info."
+        )
     )
 
 def _get_help_text(user) -> str:
@@ -236,7 +235,8 @@ async def _process_start(client, message):
             for i in range(0, len(f_buttons), 2):
                 rows.append(f_buttons[i:i+2])
             rows.append([
-                InlineKeyboardButton("Tʀʏ Aɢᴀɪɴ",
+                InlineKeyboardButton(
+                    "Tʀʏ Aɢᴀɪɴ",
                     url=f"https://t.me/{client.me.username}?start={uuid_str}"
                 )
             ])

@@ -539,7 +539,7 @@ async def _run_job(job_id: str, user_id: int):
             try:
                 prog_id = (await _get_job(job_id)).get("prog_msg_id")
                 if prog_id:
-                    await client.edit_message_text(to_chat, prog_id, "<b>»  Forwarding Completed! All files have been successfully transferred.</b>")
+                    await client.edit_message_text(to_chat, prog_id, "<b>✅ Forwarding Completed! All files have been successfully transferred.</b>")
             except Exception:
                 pass
 
@@ -554,7 +554,7 @@ async def _run_job(job_id: str, user_id: int):
                 live_sent = await client.send_message(
                     to_chat,
                     f"📡 <b>Live Job Active — monitoring for new messages…</b>\n\n"
-                    f"»  Forwarded so far: <code>{_cur_fwd}</code>\n"
+                    f"✅ Forwarded so far: <code>{_cur_fwd}</code>\n"
                     f"»  Last updated: <code>{time.strftime('%H:%M:%S')}</code>\n\n"
                     f"<i>This message updates every 60s. Powered by Arya Forward Bot</i>"
                 )
@@ -679,7 +679,7 @@ async def _run_job(job_id: str, user_id: int):
                     await client.edit_message_text(
                         to_chat, live_prog_id,
                         f"📡 <b>Live Job Active — monitoring for new messages…</b>\n\n"
-                        f"»  Forwarded so far: <code>{_cur_fwd}</code>\n"
+                        f"✅ Forwarded so far: <code>{_cur_fwd}</code>\n"
                         f"»  Last updated: <code>{time.strftime('%H:%M:%S')}</code>\n\n"
                         f"<i>This message updates every 60s. Powered by Arya Forward Bot</i>"
                     )
@@ -730,7 +730,7 @@ async def resume_live_jobs(user_id: int = None):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _status_emoji(status: str) -> str:
-    return {"running": "🟢", "stopped": "🔴", "error": "‣ "}.get(status, "» ")
+    return {"running": "🟢", "stopped": "🔴", "error": "❌"}.get(status, "» ")
 
 
 def _batch_progress(job: dict) -> str:
@@ -738,7 +738,7 @@ def _batch_progress(job: dict) -> str:
     if not job.get("batch_mode"):
         return ""
     if job.get("batch_done"):
-        return "  » » "
+        return "  » ✅"
     cursor  = job.get("batch_cursor") or job.get("batch_start_id") or "?"
     end_id  = job.get("batch_end_id") or "?"
     return f"  » {cursor}/{end_id}"
@@ -753,9 +753,9 @@ async def _render_jobs_list(bot, user_id: int, message_or_query):
             "<b>»  Live Jobs</b>\n\n"
             "<i>No jobs yet. A Live Job continuously watches a source chat\n"
             "and forwards new messages to your target — running in the background.\n\n"
-            "»  Batch mode: copy old messages first, then watch live\n"
-            "»  Dual destinations: send to 2 channels simultaneously\n"
-            "»  Per-job size limit\n\n"
+            "✅ Batch mode: copy old messages first, then watch live\n"
+            "✅ Dual destinations: send to 2 channels simultaneously\n"
+            "✅ Per-job size limit\n\n"
             "👇 Create your first job below!</i>"
         )
         btns = InlineKeyboardMarkup([
@@ -781,7 +781,7 @@ async def _render_jobs_list(bot, user_id: int, message_or_query):
             lines.append(
                 f"{st} <b>{job_name}</b>\n"
                 f"  └ <i>{j.get('from_title','?')} → {j.get('to_title','?')}{dest2}</i>\n"
-                f"  └ <code>[{j['job_id'][-6:]}]</code>  » {fwd}  » {fetched}{bp}{err}\n"
+                f"  └ <code>[{j['job_id'][-6:]}]</code>  ✅{fwd}  » {fetched}{bp}{err}\n"
             )
         import datetime
         now_str = datetime.datetime.now().strftime("%I:%M:%S %p")
@@ -845,7 +845,7 @@ async def job_rename_cb(bot, query):
         reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/cancel")]], resize_keyboard=True, one_time_keyboard=True))
     if "/cancel" not in r.text.lower():
         await db.db[COLL].update_one({"job_id": job_id}, {"$set": {"name": r.text.strip()[:100]}})
-        await bot.send_message(user_id, f"»  Live Job renamed to <b>{r.text.strip()[:100]}</b>", reply_markup=ReplyKeyboardRemove())
+        await bot.send_message(user_id, f"✅ Live Job renamed to <b>{r.text.strip()[:100]}</b>", reply_markup=ReplyKeyboardRemove())
     await _render_jobs_list(bot, user_id, r)
 
 
@@ -872,7 +872,7 @@ async def job_info_cb(bot, query):
     batch_lbl = ""
     if job.get("batch_mode"):
         if job.get("batch_done"):
-            batch_lbl = "\n<b>Batch:</b> »  Complete"
+            batch_lbl = "\n<b>Batch:</b> ✅ Complete"
         else:
             cur = job.get("batch_cursor") or job.get("batch_start_id") or "?"
             end = job.get("batch_end_id") or "calculating..."
@@ -1029,7 +1029,7 @@ async def _create_job_flow(bot, user_id: int):
     accounts = await db.get_bots(user_id)
     if not accounts:
         return await bot.send_message(user_id,
-            "<b>‣  No accounts. Add one in /settings → Accounts first.</b>")
+            "<b>❌ No accounts. Add one in /settings → Accounts first.</b>")
 
     acc_btns = [[KeyboardButton(
         f"{'»  Bot' if a.get('is_bot', True) else '»  Userbot'}: "
@@ -1069,7 +1069,7 @@ async def _create_job_flow(bot, user_id: int):
     from_chat_raw = src_r.text.strip()
     if from_chat_raw.lower() in ("me", "saved"):
         if is_bot:
-            return await src_r.reply("<b>‣  Saved Messages require a Userbot account.</b>")
+            return await src_r.reply("<b>❌ Saved Messages require a Userbot account.</b>")
         from_chat  = "me"
         from_title = "Saved Messages"
     else:
@@ -1098,7 +1098,7 @@ async def _create_job_flow(bot, user_id: int):
     channels = await db.get_user_channels(user_id)
     if not channels:
         return await bot.send_message(user_id,
-            "<b>‣  No target channels saved. Add via /settings → Channels.</b>",
+            "<b>❌ No target channels saved. Add via /settings → Channels.</b>",
             reply_markup=ReplyKeyboardRemove())
 
     to_chat, to_title, cancelled = await _ask_dest(bot, user_id, channels,
@@ -1130,8 +1130,8 @@ async def _create_job_flow(bot, user_id: int):
         "If ON, you will choose a starting message ID next.\n"
         "<i>Batch runs sequentially before live mode starts.</i>",
         reply_markup=ReplyKeyboardMarkup(
-            [[KeyboardButton("»  ON (Copy old messages first)")],
-             [KeyboardButton("‣  OFF (Live only)")],
+            [[KeyboardButton("✅ ON (Copy old messages first)")],
+             [KeyboardButton("❌ OFF (Live only)")],
              [KeyboardButton("/cancel")]],
             resize_keyboard=True, one_time_keyboard=True
         ))
@@ -1240,9 +1240,9 @@ async def _create_job_flow(bot, user_id: int):
     # Build summary
     thread_lbl = f" → Topic <code>{to_thread}</code>" if to_thread else ""
     dest2_lbl  = f"\n<b>Dest 2:</b> {to_title_2}" + (f" → Topic <code>{to_thread_2}</code>" if to_thread_2 else "") if to_chat_2 else ""
-    batch_lbl  = (f"\n<b>Batch:</b> »  ON — copying from ID {batch_start_id}"
+    batch_lbl  = (f"\n<b>Batch:</b> ✅ ON — copying from ID {batch_start_id}"
                   + (f" to {batch_end_id}" if batch_end_id else " to latest")
-                  + " first") if batch_mode else "\n<b>Batch:</b> ‣  OFF (live only)"
+                  + " first") if batch_mode else "\n<b>Batch:</b> ❌ OFF (live only)"
     size_lbl   = ""
     if max_size_mb:
         size_lbl += f"\n<b>Max size:</b> {max_size_mb} MB"
@@ -1253,7 +1253,7 @@ async def _create_job_flow(bot, user_id: int):
 
     await bot.send_message(
         user_id,
-        f"<b>»  Live Job Created & Started!</b>\n\n"
+        f"<b>✅ Live Job Created & Started!</b>\n\n"
         f"🟢 <b>{from_title}</b> → <b>{to_title}</b>{thread_lbl}"
         f"{dest2_lbl}\n"
         f"<b>Account:</b> {'»  Bot' if is_bot else '»  Userbot'}: {sel_acc.get('name','?')}\n"

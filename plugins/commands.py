@@ -13,10 +13,10 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMedi
 async def _main_buttons(user_id: int):
     lang = await db.get_language(user_id)
     return [
-        [InlineKeyboardButton('»  ᴍᴀɪɴ ᴄʜᴀɴɴᴇʟ',   url='https://t.me/MeJeetX')],
+        [InlineKeyboardButton('📢 Main Channel',   url='https://t.me/MeJeetX')],
         [
-            InlineKeyboardButton('»  ꜱᴜᴘᴘᴏʀᴛ ɢʀᴏᴜᴘ', url='https://t.me/+1p2hcQ4ZaupjNjI1'),
-            InlineKeyboardButton('»  ꜱᴛᴀᴛᴜꜱ',       callback_data='status'),
+            InlineKeyboardButton('💬 Support Group', url='https://t.me/+1p2hcQ4ZaupjNjI1'),
+            InlineKeyboardButton('🔔 Status',         callback_data='status'),
         ],
         [
             InlineKeyboardButton(_tx(lang, 'btn_help'),  callback_data='help'),
@@ -27,29 +27,29 @@ async def _main_buttons(user_id: int):
             InlineKeyboardButton(_tx(lang, 'btn_jobs'),     callback_data='job#list'),
         ],
         [
-            InlineKeyboardButton('»  ᴍᴜʟᴛɪ ᴊᴏʙ',    callback_data='mj#list'),
-            InlineKeyboardButton('»  ʙᴀᴛᴄʜ ʟɪɴᴋꜱ', callback_data='sl#start'),
+            InlineKeyboardButton('»  Mᴜʟᴛɪ Jᴏʙ',    callback_data='mj#list'),
+            InlineKeyboardButton('»  Bᴀᴛᴄʜ Lɪɴᴋs',  callback_data='sl#start'),
         ],
     ]
 
 #  static fallback used before user_id is available 
 _STATIC_BUTTONS = [
-    [InlineKeyboardButton('»  ᴍᴀɪɴ ᴄʜᴀɴɴᴇʟ',   url='https://t.me/MeJeetX')],
+    [InlineKeyboardButton('📢 Main Channel',   url='https://t.me/MeJeetX')],
     [
-        InlineKeyboardButton('»  ꜱᴜᴘᴘᴏʀᴛ ɢʀᴏᴜᴘ', url='https://t.me/+1p2hcQ4ZaupjNjI1'),
-        InlineKeyboardButton('»  ꜱᴛᴀᴛᴜꜱ',       callback_data='status'),
+        InlineKeyboardButton('💬 Support Group', url='https://t.me/+1p2hcQ4ZaupjNjI1'),
+        InlineKeyboardButton('🔔 Status',         callback_data='status'),
     ],
     [
-        InlineKeyboardButton('»  ʜᴇʟᴘ',  callback_data='help'),
-        InlineKeyboardButton('»  ᴀʙᴏᴜᴛ', callback_data='about'),
+        InlineKeyboardButton('🙋 Help',  callback_data='help'),
+        InlineKeyboardButton('💁 About', callback_data='about'),
     ],
     [
-        InlineKeyboardButton('»  ꜱᴇᴛᴛɪɴɢꜱ » ', callback_data='settings#main'),
-        InlineKeyboardButton('»  ʟɪᴠᴇ ᴊᴏʙꜱ',    callback_data='job#list'),
+        InlineKeyboardButton('⚙️ Settings', callback_data='settings#main'),
+        InlineKeyboardButton('📋 Live Jobs', callback_data='job#list'),
     ],
     [
-        InlineKeyboardButton('»  ᴍᴜʟᴛɪ ᴊᴏʙ',    callback_data='mj#list'),
-        InlineKeyboardButton('»  ʙᴀᴛᴄʜ ʟɪɴᴋꜱ', callback_data='sl#start'),
+        InlineKeyboardButton('»  Mᴜʟᴛɪ Jᴏʙ',   callback_data='mj#list'),
+        InlineKeyboardButton('»  Bᴀᴛᴄʜ Lɪɴᴋs', callback_data='sl#start'),
     ],
 ]
 

@@ -16,7 +16,7 @@ Commands:
   /newtaskjob — Start create flow directly
 
 Flow:
-  /taskjobs → list → »  Create → Step1(account) → Step2(source + skip) → Step3(dest) → starts
+  /taskjobs → list → ➕ Create → Step1(account) → Step2(source + skip) → Step3(dest) → starts
 """
 
 import re
@@ -38,7 +38,7 @@ from pyrogram.types import (
 logger = logging.getLogger(__name__)
 _CLIENT = CLIENT()
 
-#  In-memory task registry 
+# ─── In-memory task registry ───────────────────────────────────────────────────
 # task_job_id → asyncio.Task
 _task_jobs: dict[str, asyncio.Task] = {}
 # task_job_id → pause Event (set = running, clear = paused)
@@ -119,9 +119,9 @@ def _st_emoji(status: str) -> str:
         "running": "🟢",
         "paused":  "⏸",
         "stopped": "🔴",
-        "done":    "» ",
-        "error":   "‣ ",
-    }.get(status, "» ")
+        "done":    "✅",
+        "error":   "⚠️",
+    }.get(status, "❓")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -175,7 +175,7 @@ async def _dl_worker(worker_id, dl_queue, up_queue, client, to_chat, thread_id):
         seq_idx, msg, caption, forward_tag, remove_caption = task
         
         try:
-            #  Attempt 1: copy_message (if restricted, raises exception)
+            # ── Attempt 1: copy_message (if restricted, raises exception)
             for attempt in range(3):
                 try:
                     kw = {"message_thread_id": thread_id} if thread_id else {}
@@ -206,7 +206,7 @@ async def _dl_worker(worker_id, dl_queue, up_queue, client, to_chat, thread_id):
                         await up_queue.put((seq_idx, 'skip', None, None))
                         break
 
-                    #  Attempt 2: download + re-upload 
+                    # ── Attempt 2: download + re-upload ─────────────────────────────
                     # Must be restricted/protected, do download:
                     fp = None
                     media_obj = getattr(msg, msg.media.value, None) if msg.media else None
@@ -307,13 +307,13 @@ async def _run_task_job(job_id: str, user_id: int):
         job_start_time = time.time()
         forwarded_at_start = job.get("forwarded", 0)
 
-        #  Destination progress bar setup 
+        # ── Destination progress bar setup ──────────────────────────────────
         to_chat_for_prog = job.get("to_chat")
         prog_msg_id = job.get("prog_msg_id", None)
         if not prog_msg_id:
             try:
                 sent = await client.send_message(to_chat_for_prog,
-                    "<b>»  Task Job Starting...</b>\n<code>[░░░░░░░░░░] 0%</code>\n\n<i>Please wait...</i>")
+                    "<b>📦 Task Job Starting...</b>\n<code>[░░░░░░░░░░] 0%</code>\n\n<i>Please wait...</i>")
                 prog_msg_id = sent.id
                 await _tj_update(job_id, prog_msg_id=prog_msg_id)
                 try: await client.pin_chat_message(to_chat_for_prog, prog_msg_id, disable_notification=True)
@@ -329,21 +329,21 @@ async def _run_task_job(job_id: str, user_id: int):
         last_prog_update = 0.0
 
         while True:
-            #  Pause check 
+            # ── Pause check ────────────────────────────────────────────────
             await pause_ev.wait()  # blocks here if paused
 
-            #  Stop check 
+            # ── Stop check ────────────────────────────────────────────────
             fresh = await _tj_get(job_id)
             if not fresh or fresh.get("status") in ("stopped", "error"):
                 break
 
-            #  End check 
+            # ── End check ─────────────────────────────────────────────────
             if end_id > 0 and current > end_id:
                 await _tj_update(job_id, status="done", current_id=current)
                 logger.info(f"[TaskJob {job_id}] Completed — reached end_id {end_id}")
                 break
 
-            #  Load settings 
+            # ── Load settings ─────────────────────────────────────────────
             disabled_types = await db.get_filters(user_id)
             configs        = await db.get_configs(user_id)
             filters_dict   = configs.get('filters', {})
@@ -353,13 +353,13 @@ async def _run_task_job(job_id: str, user_id: int):
             forward_tag    = configs.get('forward_tag', False)
             sleep_secs     = max(1, configs.get('duration', 1) or 1)
 
-            #  Build batch of IDs 
+            # ── Build batch of IDs ─────────────────────────────────────────
             batch_end = current + BATCH_SIZE - 1
             if end_id > 0:
                 batch_end = min(batch_end, end_id)
             batch_ids = list(range(current, batch_end + 1))
 
-            #  Fetch messages 
+            # ── Fetch messages ─────────────────────────────────────────────
             try:
                 if is_bot:
                     msgs = await client.get_messages(from_chat, batch_ids)
@@ -380,7 +380,7 @@ async def _run_task_job(job_id: str, user_id: int):
                 await _tj_update(job_id, current_id=current)
                 continue
 
-            #  Sort & filter 
+            # ── Sort & filter ──────────────────────────────────────────────
             valid = [m for m in msgs if m and not m.empty]
             valid.sort(key=lambda m: m.id)  # guarantee ascending order
 
@@ -408,7 +408,7 @@ async def _run_task_job(job_id: str, user_id: int):
 
             await _tj_update(job_id, consecutive_empty=0)
 
-            #  Pipeline Execution (Strict Order) 
+            # ── Pipeline Execution (Strict Order) ────────────────────────────
             MAX_WORKERS = 2
             dl_queue = asyncio.Queue(maxsize=100)
             up_queue = asyncio.Queue(maxsize=100)
@@ -504,7 +504,7 @@ async def _run_task_job(job_id: str, user_id: int):
 
             await asyncio.gather(*workers)
 
-            #  Advance cursor 
+            # ── Advance cursor ─────────────────────────────────────────────
             if valid:
                 current = valid[-1].id + 1
             else:
@@ -512,7 +512,7 @@ async def _run_task_job(job_id: str, user_id: int):
 
             await _tj_update(job_id, current_id=current)
 
-            #  Update destination progress bar with live ETA 
+            # ── Update destination progress bar with live ETA ──────────────────
             now_t = time.time()
             if prog_msg_id and to_chat_for_prog and (now_t - last_prog_update) >= 30:
                 last_prog_update = now_t
@@ -544,11 +544,11 @@ async def _run_task_job(job_id: str, user_id: int):
 
                     bar = _make_prog_bar(pct)
                     prog_text = (
-                        f"<b>»  Task Job Running</b>\n"
+                        f"<b>📦 Task Job Running</b>\n"
                         f"<code>{bar}</code>\n\n"
-                        f"»  Forwarded: {total_fwd}\n"
-                        f"»  At msg: {current}\n"
-                        f"»  ETA: {eta_str}"
+                        f"✅ Forwarded: {total_fwd}\n"
+                        f"📍 At msg: {current}\n"
+                        f"⏳ ETA: {eta_str}"
                     )
                     await client.edit_message_text(to_chat_for_prog, prog_msg_id, prog_text)
                 except Exception:
@@ -563,7 +563,7 @@ async def _run_task_job(job_id: str, user_id: int):
                 fresh_j = await _tj_get(job_id)
                 total_fwd = fresh_j.get("forwarded", 0) if fresh_j else 0
                 await client.edit_message_text(to_chat_for_prog, prog_msg_id,
-                    f"<b>⏹ Task Job Stopped</b>\n<code>[░░░░░░░░░░] — Paused</code>\n\n»  Forwarded: {total_fwd}")
+                    f"<b>⏹ Task Job Stopped</b>\n<code>[░░░░░░░░░░] — Paused</code>\n\n✅ Forwarded: {total_fwd}")
             except Exception: pass
     except Exception as e:
         logger.error(f"[TaskJob {job_id}] Fatal: {e}")
@@ -611,21 +611,21 @@ async def _render_taskjob_list(bot, user_id: int, message_or_query):
 
     if not jobs:
         text = (
-            "<b>»  Task Jobs</b>\n\n"
+            "<b>📦 Task Jobs</b>\n\n"
             "<i>No task jobs yet.\n\n"
             "A <b>Task Job</b> copies all existing messages from a source channel\n"
             "to your target — running fully in the background.\n\n"
-            "»  Supports pause / resume\n"
-            "»  Multiple jobs simultaneously\n"
-            "»  Real-time status\n"
-            "»  Continues from where it left off\n\n"
+            "✅ Supports pause / resume\n"
+            "✅ Multiple jobs simultaneously\n"
+            "✅ Real-time status\n"
+            "✅ Continues from where it left off\n\n"
             "👇 Create your first task job below!</i>"
         )
         btns = InlineKeyboardMarkup([[
-            InlineKeyboardButton("»  Create Task Job", callback_data="tj#new")
+            InlineKeyboardButton("➕ Create Task Job", callback_data="tj#new")
         ]])
     else:
-        lines = ["<b>»  Your Task Jobs</b>\n"]
+        lines = ["<b>📦 Your Task Jobs</b>\n"]
         for j in jobs:
             st  = _st_emoji(j.get("status", "stopped"))
             fwd = j.get("forwarded", 0)
@@ -633,7 +633,7 @@ async def _render_taskjob_list(bot, user_id: int, message_or_query):
             err = f" <code>[{j.get('error','')}]</code>" if j.get("status") == "error" else ""
             lines.append(
                 f"{st} <b>{j.get('from_title','?')} → {j.get('to_title','?')}</b>"
-                f"  <code>[{j['job_id'][-6:]}]</code>  » {fwd}  » {cur}{err}"
+                f"  <code>[{j['job_id'][-6:]}]</code>  ✅{fwd}  📍{cur}{err}"
             )
         text = "\n".join(lines)
 
@@ -647,16 +647,16 @@ async def _render_taskjob_list(bot, user_id: int, message_or_query):
                 row.append(InlineKeyboardButton(f"⏸ Pause [{short}]",  callback_data=f"tj#pause#{jid}"))
                 row.append(InlineKeyboardButton(f"⏹ Stop [{short}]",   callback_data=f"tj#stop#{jid}"))
             elif st == "paused":
-                row.append(InlineKeyboardButton(f"»  Resume [{short}]", callback_data=f"tj#resume#{jid}"))
+                row.append(InlineKeyboardButton(f"▶️ Resume [{short}]", callback_data=f"tj#resume#{jid}"))
                 row.append(InlineKeyboardButton(f"⏹ Stop [{short}]",   callback_data=f"tj#stop#{jid}"))
             else:
-                row.append(InlineKeyboardButton(f"»  Start [{short}]",  callback_data=f"tj#start#{jid}"))
-            row.append(InlineKeyboardButton(f"»  [{short}]", callback_data=f"tj#info#{jid}"))
-            row.append(InlineKeyboardButton(f"»  [{short}]",  callback_data=f"tj#del#{jid}"))
+                row.append(InlineKeyboardButton(f"▶️ Start [{short}]",  callback_data=f"tj#start#{jid}"))
+            row.append(InlineKeyboardButton(f"ℹ️ [{short}]", callback_data=f"tj#info#{jid}"))
+            row.append(InlineKeyboardButton(f"🗑 [{short}]",  callback_data=f"tj#del#{jid}"))
             btns_list.append(row)
 
-        btns_list.append([InlineKeyboardButton("»  Create Task Job", callback_data="tj#new")])
-        btns_list.append([InlineKeyboardButton("»  Refresh",         callback_data="tj#list")])
+        btns_list.append([InlineKeyboardButton("➕ Create Task Job", callback_data="tj#new")])
+        btns_list.append([InlineKeyboardButton("🔄 Refresh",         callback_data="tj#list")])
         btns = InlineKeyboardMarkup(btns_list)
 
     try:
@@ -713,7 +713,7 @@ async def tj_info_cb(bot, query):
     end_lbl = f"ID {end_id}" if end_id else "∞ (all messages)"
 
     text = (
-        f"<b>»  Task Job Info</b>\n\n"
+        f"<b>📦 Task Job Info</b>\n\n"
         f"<b>ID:</b> <code>{job_id[-6:]}</code>\n"
         f"<b>Status:</b> {st} {job.get('status', '?')}\n"
         f"<b>Source:</b> {job.get('from_title', '?')}\n"
@@ -725,10 +725,10 @@ async def tj_info_cb(bot, query):
         f"<b>Created:</b> {created}\n"
     )
     if job.get("error"):
-        text += f"\n<b>‣  Error:</b> <code>{job['error']}</code>"
+        text += f"\n<b>⚠️ Error:</b> <code>{job['error']}</code>"
 
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[
-        InlineKeyboardButton("«  Back", callback_data="tj#list")
+        InlineKeyboardButton("↩ Back", callback_data="tj#list")
     ]]))
 
 
@@ -765,12 +765,12 @@ async def tj_resume_cb(bot, query):
     if ev and job_id in _task_jobs and not _task_jobs[job_id].done():
         ev.set()
         await _tj_update(job_id, status="running")
-        await query.answer("»  Job resumed!", show_alert=False)
+        await query.answer("▶️ Job resumed!", show_alert=False)
     else:
         # Task died while paused — restart it fresh from saved cursor
         await _tj_update(job_id, status="running")
         _start_task(job_id, user_id)
-        await query.answer("»  Job restarted from saved position!", show_alert=False)
+        await query.answer("▶️ Job restarted from saved position!", show_alert=False)
 
     await _render_taskjob_list(bot, user_id, query)
 
@@ -810,7 +810,7 @@ async def tj_start_cb(bot, query):
 
     await _tj_update(job_id, status="running")
     _start_task(job_id, user_id)
-    await query.answer("»  Task Job started!", show_alert=False)
+    await query.answer("▶️ Task Job started!", show_alert=False)
     await _render_taskjob_list(bot, user_id, query)
 
 
@@ -831,7 +831,7 @@ async def tj_del_cb(bot, query):
     if ev: ev.set()
 
     await _tj_delete(job_id)
-    await query.answer("»  Task Job deleted.", show_alert=False)
+    await query.answer("🗑 Task Job deleted.", show_alert=False)
     await _render_taskjob_list(bot, user_id, query)
 
 
@@ -840,20 +840,20 @@ async def tj_del_cb(bot, query):
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def _create_taskjob_flow(bot, user_id: int):
-    #  Step 1: Account 
+    # ── Step 1: Account ─────────────────────────────────────────────────────
     accounts = await db.get_bots(user_id)
     if not accounts:
         return await bot.send_message(user_id,
-            "<b>‣  No accounts found. Add one in /settings → Accounts first.</b>")
+            "<b>❌ No accounts found. Add one in /settings → Accounts first.</b>")
 
     acc_btns = [[KeyboardButton(
-        f"{'»  Bot' if a.get('is_bot', True) else '»  Userbot'}: "
+        f"{'🤖 Bot' if a.get('is_bot', True) else '👤 Userbot'}: "
         f"{a.get('username') or a.get('name', 'Unknown')} [{a['id']}]"
     )] for a in accounts]
     acc_btns.append([KeyboardButton("/cancel")])
 
     acc_r = await _ask(bot, user_id,
-        "<b>»  Create Task Job — Step 1/4</b>\n\n"
+        "<b>📦 Create Task Job — Step 1/4</b>\n\n"
         "Choose the account to use for this task:\n"
         "<i>(Userbot required for private/restricted channels)</i>",
         reply_markup=ReplyKeyboardMarkup(acc_btns, resize_keyboard=True, one_time_keyboard=True))
@@ -868,7 +868,7 @@ async def _create_taskjob_flow(bot, user_id: int):
     sel_acc = (await db.get_bot(user_id, acc_id)) if acc_id else accounts[0]
     is_bot  = sel_acc.get("is_bot", True)
 
-    #  Step 2: Source Chat 
+    # ── Step 2: Source Chat ──────────────────────────────────────────────────
     src_r = await _ask(bot, user_id,
         "<b>Step 2/4 — Source Channel</b>\n\n"
         "Send the source channel:\n"
@@ -898,7 +898,7 @@ async def _create_taskjob_flow(bot, user_id: int):
     except Exception:
         from_title = str(from_chat)
 
-    #  Step 3: Start ID and End ID 
+    # ── Step 3: Start ID and End ID ─────────────────────────────────────────
     range_r = await _ask(bot, user_id,
         "<b>Step 3/4 — Message Range</b>\n\n"
         "Choose how many messages to copy:\n\n"
@@ -925,11 +925,11 @@ async def _create_taskjob_flow(bot, user_id: int):
             try: start_id = int(rtext)
             except Exception: pass
 
-    #  Step 4: Destination 
+    # ── Step 4: Destination ──────────────────────────────────────────────────
     channels = await db.get_user_channels(user_id)
     if not channels:
         return await bot.send_message(user_id,
-            "<b>‣  No target channels saved. Add via /settings → Channels.</b>",
+            "<b>❌ No target channels saved. Add via /settings → Channels.</b>",
             reply_markup=ReplyKeyboardRemove())
 
     ch_btns = [[KeyboardButton(ch['title'])] for ch in channels]
@@ -953,7 +953,7 @@ async def _create_taskjob_flow(bot, user_id: int):
         return await bot.send_message(user_id, "<b>Invalid selection. Cancelled.</b>",
                                       reply_markup=ReplyKeyboardRemove())
 
-    #  Save & Start 
+    # ── Save & Start ──────────────────────────────────────────────────────────
     job_id = f"tj-{user_id}-{int(time.time())}"
     job = {
         "job_id":      job_id,
@@ -978,9 +978,9 @@ async def _create_taskjob_flow(bot, user_id: int):
     end_lbl = f"up to ID <code>{end_id}</code>" if end_id else "all messages"
     await bot.send_message(
         user_id,
-        f"<b>»  Task Job Created & Started!</b>\n\n"
+        f"<b>✅ Task Job Created & Started!</b>\n\n"
         f"🟢 Copying <b>{from_title}</b> → <b>{to_title}</b>\n"
-        f"<b>Account:</b> {'»  Bot' if is_bot else '»  Userbot'}: {sel_acc.get('name','?')}\n"
+        f"<b>Account:</b> {'🤖 Bot' if is_bot else '👤 Userbot'}: {sel_acc.get('name','?')}\n"
         f"<b>Range:</b> From ID <code>{start_id}</code> · {end_lbl}\n"
         f"<b>Job ID:</b> <code>{job_id[-6:]}</code>\n\n"
         f"<i>Running in the background.\n"
