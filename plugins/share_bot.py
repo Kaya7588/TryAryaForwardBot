@@ -44,6 +44,50 @@ def format_msg(text: str, user) -> str:
     except Exception:
         return text
 
+def _sc(text: str) -> str:
+    return text.translate(str.maketrans(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘQʀꜱᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘQʀꜱᴛᴜᴠᴡxʏᴢ"
+    ))
+
+def _get_base_header(user) -> str:
+    u_name = user.first_name or "User"
+    return (
+        f"›› {_sc('Hey!!')}, {u_name}\n\n"
+        f"➤ {_sc('Purpose of the bot: This bot makes renaming anime and series files easy and stress-free.')}\n\n"
+        f"‣ {_sc('Maintained by')} : {_sc('Yato')}\n"
+        f"──────────────────\n"
+    )
+
+def _get_welcome_text(user, bot_name, custom_wel=None) -> str:
+    if custom_wel:
+        return format_msg(custom_wel, user)
+    return _get_base_header(user) + _sc(
+        "I am a permanent file store bot — users can access stored messages\n"
+        "by using a shareable link created for them.\n\n"
+        "Click a link button from the channel to receive your files directly here.\n"
+        "To know more, click the Help button below."
+    )
+
+def _get_help_text(user) -> str:
+    return _get_base_header(user) + _sc(
+        "Help Menu\n\n"
+        "I am a permanent file store bot. You can access stored files by using "
+        "a shareable link given by me from the channel.\n\n"
+        "How to Get Files:\n"
+        "➜ Open the channel and tap a link button\n"
+        "➜ I will send the files directly to your DM\n"
+        "➜ If force-subscribe is enabled, join required channels first\n"
+        "➜ If your files are deleted, tap the same button again\n\n"
+        "Available Commands:\n"
+        "➜ /start — check if I'm alive\n"
+        "➜ Click any episode link button in the channel to receive files\n\n"
+        "Bot Info:\n"
+        "➜ All deliveries are encrypted and protected\n"
+        "➜ Files may auto-delete after a set time (copyright protection)\n"
+        "➜ Simply click your link button again to re-download"
+    )
+
 
 async def delete_later(client, chat_id, msg_ids: list, notice_id: int, delay_secs: int):
     await asyncio.sleep(delay_secs)
@@ -330,80 +374,44 @@ async def _send_welcome(client, message, bot_id: str = None):
     user = message.from_user
     bot_name = client.me.first_name if client.me else "Delivery Bot"
 
-    # Full name mention (clickable)
-    full_name = (user.first_name or "") + (" " + user.last_name if user.last_name else "")
-    mention = f'<a href="tg://user?id={user.id}">{full_name.strip()}</a>'
-
     # Bot-specific welcome text or global
     custom_wel = (await db.get_share_bot_text(bot_id, "welcome_msg") if bot_id else "") or \
                  await db.get_share_text("welcome_msg", "")
 
-    # Image is SHARED between Welcome and About — always pull from About section
+    txt = _get_welcome_text(user, bot_name, custom_wel)
+
     bot_about = await db.get_share_bot_about(bot_id) if bot_id else {}
     about_img = bot_about.get('image_id') if bot_about else None
 
-    if custom_wel:
-        txt = format_msg(custom_wel, user).replace("{mention}", mention)
-    else:
-        txt = (
-            f"<b>👋 Wᴇʟᴄᴏᴍᴇ ᴛᴏ {bot_name}!</b>\n\n"
-            f"Hᴇʟʟᴏ {mention} ✨\n\n"
-            "<i>I am a permanent file store bot — users can access stored messages "
-            "by using a shareable link created for them.</i>\n\n"
-            "Click a link button from the channel to receive your files directly here.\n"
-            "<i>To know more, click the Help button below.</i>"
-        )
-
     buttons = [
         [
-            InlineKeyboardButton("ʜᴇʟᴘ", callback_data="sbd#help"),
-            InlineKeyboardButton("ᴀʙᴏᴜᴛ", callback_data="sbd#about"),
+            InlineKeyboardButton(_sc("Help"), callback_data="sbd#help"),
+            InlineKeyboardButton(_sc("About"), callback_data="sbd#about"),
         ],
-        [
-            InlineKeyboardButton("🔔 Uᴘᴅᴀᴛᴇ Cʜᴀɴɴᴇʟ", url=UPDATE_LINK)
-        ]
+        [InlineKeyboardButton("🔔 " + _sc("Update Channel"), url=UPDATE_LINK)]
     ]
+    markup = InlineKeyboardMarkup(buttons)
 
     try:
         if about_img:
-            await client.send_photo(
-                user.id, photo=about_img,
-                caption=txt,
-                reply_markup=InlineKeyboardMarkup(buttons)
-            )
+            await client.send_photo(user.id, photo=about_img, caption=txt, reply_markup=markup)
         else:
-            await message.reply_text(txt, reply_markup=InlineKeyboardMarkup(buttons))
+            await message.reply_text(txt, reply_markup=markup)
     except Exception:
-        await message.reply_text(txt, reply_markup=InlineKeyboardMarkup(buttons))
+        await message.reply_text(txt, reply_markup=markup)
 
 
 async def _send_help(client, message, bot_id: str = None):
-    """Send the Help menu."""
-    txt = (
-        "<b>🌵 Hᴇʟᴘ Mᴇɴᴜ</b>\n\n"
-        "<i>I am a permanent file store bot. You can access stored files by using "
-        "a shareable link given by me from the channel.</i>\n\n"
-        "<b>📚 How to Get Files:</b>\n"
-        "<i>➜ Open the channel and tap a link button\n"
-        "➜ I will send the files directly to your DM\n"
-        "➜ If force-subscribe is enabled, join required channels first\n"
-        "➜ If your files are deleted, tap the same button again</i>\n\n"
-        "<b>📚 Available Commands:</b>\n"
-        "<i>➜ /start — check if I'm alive\n"
-        "➜ Click any episode link button in the channel to receive files</i>\n\n"
-        "<b>🛡️ Bot Info:</b>\n"
-        "<i>➜ All file deliveries are encrypted and protected\n"
-        "➜ Files may auto-delete after a set time (copyright protection)\n"
-        "➜ Simply click your link button again to re-download</i>"
-    )
+    """Send the Help menu for /start help."""
+    txt = _get_help_text(message.from_user)
     buttons = [
-        [InlineKeyboardButton("◀️ Bᴀᴄᴋ", callback_data="sbd#back")],
-        [InlineKeyboardButton("🔔 Uᴘᴅᴀᴛᴇ Cʜᴀɴɴᴇʟ", url=UPDATE_LINK)]
+        [InlineKeyboardButton("◀️ " + _sc("Back"), callback_data="sbd#back")],
+        [InlineKeyboardButton("🔔 " + _sc("Update Channel"), url=UPDATE_LINK)]
     ]
     try:
-        await message.edit_text(txt, reply_markup=InlineKeyboardMarkup(buttons))
-    except Exception:
         await message.reply_text(txt, reply_markup=InlineKeyboardMarkup(buttons))
+    except Exception:
+        pass
 
 
 async def _send_about(client, query_or_msg, bot_id: str = None, edit: bool = True):
@@ -419,44 +427,36 @@ async def _send_about(client, query_or_msg, bot_id: str = None, edit: bool = Tru
     support_link = about.get('support_link', SUPPORT_LINK)
     from plugins.commands import get_bot_version
     version      = about.get('version', get_bot_version())
-    about_img    = about.get('image_id', None)   # SHARED with Welcome
     about_text   = about.get('custom_text', None)
+    
+    msg = query_or_msg if hasattr(query_or_msg, 'photo') else getattr(query_or_msg, 'message', query_or_msg)
+    user = getattr(query_or_msg, 'from_user', getattr(msg, 'from_user', None))
 
     if about_text:
-        txt = about_text
+        txt = _get_base_header(user) + _sc(about_text)
     else:
-        txt = (
-            f"✨ <b>ᴀʙᴏᴜᴛ ᴍᴇ</b>\n\n"
-            f"✰ <b>ᴍʏ ɴᴀᴍᴇ:</b> {bot_name}\n"
-            f"✰ <b>ᴏᴘᴇʀᴀᴛᴇᴅ ʙʏ:</b> Arya Bot\n"
-            f"✰ <b>ᴍʏ ᴏᴡɴᴇʀ:</b> <a href=\"{owner_link}\">{owner_name}</a>\n"
-            f"✰ <b>ᴜᴘᴅᴀᴛᴇs:</b> <a href=\"{update_link}\">{update_chan}</a>\n"
-            f"✰ <b>sᴜᴘᴘᴏʀᴛ:</b> <a href=\"{support_link}\">{support_chan}</a>\n"
-            f"✰ <b>ᴠᴇʀsɪᴏɴ:</b> {version}"
+        about_body = (
+            f"About Me\n\n"
+            f"My Name: {bot_name}\n"
+            f"Operated By: Arya Bot\n"
+            f"My Owner: <a href=\"{owner_link}\">{owner_name}</a>\n"
+            f"Updates: <a href=\"{update_link}\">{update_chan}</a>\n"
+            f"Support: <a href=\"{support_link}\">{support_chan}</a>\n"
+            f"Version: {version}"
         )
+        txt = _get_base_header(user) + _sc(about_body)
 
-    buttons = [[InlineKeyboardButton("◀️ Bᴀᴄᴋ", callback_data="sbd#back")]]
+    buttons = [[InlineKeyboardButton("◀️ " + _sc("Back"), callback_data="sbd#back")]]
     markup  = InlineKeyboardMarkup(buttons)
 
-    # Determine if current message is a photo (sent with image) or text
-    msg = query_or_msg if hasattr(query_or_msg, 'photo') else getattr(query_or_msg, 'message', query_or_msg)
     is_photo_msg = bool(getattr(msg, 'photo', None))
-
     try:
         if is_photo_msg:
-            # Edit caption inline — preserves the welcome image
             await msg.edit_caption(caption=txt, reply_markup=markup)
         else:
-            # Edit text inline — no deletion, no new message
             await msg.edit_text(txt, reply_markup=markup, disable_web_page_preview=True)
     except Exception as e:
         logger.warning(f"_send_about edit failed: {e}")
-        try:
-            await msg.reply_text(txt, reply_markup=markup, disable_web_page_preview=True)
-        except Exception:
-            pass
-
-
 
 async def _process_delivery_button(client, query):
     """Handle inline buttons on the welcome/help/about messages."""
@@ -467,35 +467,16 @@ async def _process_delivery_button(client, query):
 
     if cmd == "help":
         await query.answer()
-        txt = (
-            "<b>🌵 Hᴇʟᴘ Mᴇɴᴜ</b>\n\n"
-            "<i>I am a permanent file store bot. You can access stored files by using "
-            "a shareable link given by me from the channel.</i>\n\n"
-            "<b>📚 How to Get Files:</b>\n"
-            "<i>➜ Open the channel and tap a link button\n"
-            "➜ I will send the files directly to your DM\n"
-            "➜ If force-subscribe is enabled, join required channels first\n"
-            "➜ If your files are deleted, tap the same button again</i>\n\n"
-            "<b>📚 Available Commands:</b>\n"
-            "<i>➜ /start — check if I'm alive\n"
-            "➜ Click any episode link button in the channel to receive files</i>\n\n"
-            "<b>🛡️ Bot Info:</b>\n"
-            "<i>➜ All file deliveries are encrypted and protected\n"
-            "➜ Files may auto-delete after a set time (copyright protection)\n"
-            "➜ Simply click your link button again to re-download</i>"
-        )
+        txt = _get_help_text(query.from_user)
         buttons = [
-            [InlineKeyboardButton("◀️ Bᴀᴄᴋ", callback_data="sbd#back")],
-            [InlineKeyboardButton("🔔 Uᴘᴅᴀᴛᴇ Cʜᴀɴɴᴇʟ", url=UPDATE_LINK)]
+            [InlineKeyboardButton("◀️ " + _sc("Back"), callback_data="sbd#back")],
+            [InlineKeyboardButton("🔔 " + _sc("Update Channel"), url=UPDATE_LINK)]
         ]
         markup = InlineKeyboardMarkup(buttons)
         try:
-            if is_photo:
-                await msg.edit_caption(caption=txt, reply_markup=markup)
-            else:
-                await msg.edit_text(txt, reply_markup=markup)
-        except Exception:
-            await msg.reply_text(txt, reply_markup=markup)
+            if is_photo: await msg.edit_caption(caption=txt, reply_markup=markup)
+            else: await msg.edit_text(txt, reply_markup=markup)
+        except Exception: pass
 
     elif cmd == "about":
         await query.answer()
@@ -503,41 +484,21 @@ async def _process_delivery_button(client, query):
 
     elif cmd == "back":
         await query.answer()
-        # Go back to welcome — edit current message in-place
         bot_name = client.me.first_name if client.me else "Delivery Bot"
-        user = query.from_user
-        full_name = (user.first_name or "") + (" " + user.last_name if user.last_name else "")
-        mention = f'<a href="tg://user?id={user.id}">{full_name.strip()}</a>'
-
-        bot_about = await db.get_share_bot_about(bot_id) if bot_id else {}
-        about_img = bot_about.get('image_id') if bot_about else None
-
-        custom_wel = (await db.get_share_bot_text(bot_id, "welcome_msg") if bot_id else "") or \
-                     await db.get_share_text("welcome_msg", "")
-        if custom_wel:
-            txt = format_msg(custom_wel, user).replace("{mention}", mention)
-        else:
-            txt = (
-                f"<b>👋 Wᴇʟᴄᴏᴍᴇ ᴛᴏ {bot_name}!</b>\n\n"
-                f"Hᴇʟʟᴏ {mention} ✨\n\n"
-                "<i>I am a permanent file store bot — users can access stored messages "
-                "by using a shareable link created for them.</i>\n\n"
-                "Click a link button from the channel to receive your files directly here.\n"
-                "<i>To know more, click the Help button below.</i>"
-            )
+        custom_wel = (await db.get_share_bot_text(bot_id, "welcome_msg") if bot_id else "") or await db.get_share_text("welcome_msg", "")
+        txt = _get_welcome_text(query.from_user, bot_name, custom_wel)
+        
         buttons = [
             [
-                InlineKeyboardButton("ʜᴇʟᴘ", callback_data="sbd#help"),
-                InlineKeyboardButton("ᴀʙᴏᴜᴛ", callback_data="sbd#about"),
+                InlineKeyboardButton(_sc("Help"), callback_data="sbd#help"),
+                InlineKeyboardButton(_sc("About"), callback_data="sbd#about"),
             ],
-            [InlineKeyboardButton("🔔 Uᴘᴅᴀᴛᴇ Cʜᴀɴɴᴇʟ", url=UPDATE_LINK)]
+            [InlineKeyboardButton("🔔 " + _sc("Update Channel"), url=UPDATE_LINK)]
         ]
         markup = InlineKeyboardMarkup(buttons)
         try:
-            if is_photo:
-                await msg.edit_caption(caption=txt, reply_markup=markup)
-            else:
-                await msg.edit_text(txt, reply_markup=markup)
+            if is_photo: await msg.edit_caption(caption=txt, reply_markup=markup)
+            else: await msg.edit_text(txt, reply_markup=markup)
         except Exception:
             pass
     else:

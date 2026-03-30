@@ -22,9 +22,12 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
 from database import db
 from plugins.test import CLIENT
-from plugins.jobs import _ask
 
-_CLIENT = CLIENT()
+def _sc(text: str) -> str:
+    return text.translate(str.maketrans(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘQʀꜱᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘQʀꜱᴛᴜᴠᴡxʏᴢ"
+    ))
 
 new_share_job = {}
 
@@ -116,36 +119,65 @@ async def _create_share_flow(bot, user_id):
                 if parts[-1].isdigit(): return int(parts[-1])
             raise ValueError("Invalid Message ID or Link (must be forwarded or contain ID)")
             
+        markup_status = ReplyKeyboardMarkup([["✅ Completed", "⏳ Ongoing"], ["/cancel"]], resize_keyboard=True, one_time_keyboard=True)
+        msg_status = await _ask(bot, user_id, 
+            "<b>❪ STEP 4: STORY STATUS ❫</b>\n\nIs this story Completed or Ongoing?", 
+            reply_markup=markup_status
+        )
+        if (msg_status.text or "") == "/cancel": return await bot.send_message(user_id, "Cancelled.", reply_markup=ReplyKeyboardRemove())
+        is_completed = "completed" in (msg_status.text or "").lower()
+        new_share_job[user_id]['is_completed'] = is_completed
+
         msg_story = await _ask(bot, user_id, 
-            "<b>❪ STEP 4: STORY NAME ❫</b>\n\nEnter the clean name of the Series/Story (e.g. <code>TDMB</code>):", 
+            "<b>❪ STEP 5: STORY NAME ❫</b>\n\nEnter the clean name of the Series/Story (e.g. <code>TDMB</code>):", 
             reply_markup=markup
         )
         if (msg_story.text or "") == "/cancel": return await bot.send_message(user_id, "Cancelled.", reply_markup=ReplyKeyboardRemove())
         new_share_job[user_id]['story'] = (msg_story.text or msg_story.caption or "").strip()
         
-        msg_start = await _ask(bot, user_id, 
-            "<b>❪ STEP 5: START MESSAGE ❫</b>\n\nForward the first message, send its Message ID, or paste its Link (e.g. <code>https://t.me/c/123/456</code>):", 
-            reply_markup=markup
+        markup_source = ReplyKeyboardMarkup([["📝 Regular Channel", "📂 Group Topic"], ["/cancel"]], resize_keyboard=True, one_time_keyboard=True)
+        msg_stype = await _ask(bot, user_id, 
+            "<b>❪ STEP 6: SOURCE STRUCTURE ❫</b>\n\nAre the files in a normal Channel (requires start/end IDs)\nor inside a specific Group Topic (auto-scans entire topic)?", 
+            reply_markup=markup_source
         )
-        if (msg_start.text or "") == "/cancel": return await bot.send_message(user_id, "Cancelled.", reply_markup=ReplyKeyboardRemove())
-        start_id = parse_id(msg_start)
-        new_share_job[user_id]['start_id'] = start_id
-        
-        msg_end = await _ask(bot, user_id, 
-            "<b>❪ STEP 6: LAST MESSAGE ❫</b>\n\nForward the last message, send its Msg ID, or paste its Link:", 
-            reply_markup=markup
-        )
-        if (msg_end.text or "") == "/cancel": return await bot.send_message(user_id, "Cancelled.", reply_markup=ReplyKeyboardRemove())
-        end_id = parse_id(msg_end)
-        new_share_job[user_id]['end_id'] = end_id
-        
-        if start_id > end_id:
-            start_id, end_id = end_id, start_id
+        if (msg_stype.text or "") == "/cancel": return await bot.send_message(user_id, "Cancelled.", reply_markup=ReplyKeyboardRemove())
+        is_topic = "topic" in (msg_stype.text or "").lower()
+        new_share_job[user_id]['is_topic'] = is_topic
+
+        if is_topic:
+            msg_topic = await _ask(bot, user_id, 
+                "<b>❪ STEP 7: GROUP TOPIC LINK ❫</b>\n\nPaste the link to the Topic (e.g. <code>https://t.me/c/123/45</code>):", 
+                reply_markup=markup
+            )
+            if (msg_topic.text or "") == "/cancel": return await bot.send_message(user_id, "Cancelled.", reply_markup=ReplyKeyboardRemove())
+            topic_id = parse_id(msg_topic)
+            new_share_job[user_id]['topic_id'] = topic_id
+            new_share_job[user_id]['start_id'] = topic_id
+            new_share_job[user_id]['end_id'] = topic_id
+        else:
+            msg_start = await _ask(bot, user_id, 
+                "<b>❪ STEP 7: START MESSAGE ❫</b>\n\nForward the first message, send its Message ID, or paste its Link (e.g. <code>https://t.me/c/123/456</code>):", 
+                reply_markup=markup
+            )
+            if (msg_start.text or "") == "/cancel": return await bot.send_message(user_id, "Cancelled.", reply_markup=ReplyKeyboardRemove())
+            start_id = parse_id(msg_start)
             new_share_job[user_id]['start_id'] = start_id
+            
+            msg_end = await _ask(bot, user_id, 
+                "<b>❪ STEP 8: LAST MESSAGE ❫</b>\n\nForward the last message, send its Msg ID, or paste its Link:", 
+                reply_markup=markup
+            )
+            if (msg_end.text or "") == "/cancel": return await bot.send_message(user_id, "Cancelled.", reply_markup=ReplyKeyboardRemove())
+            end_id = parse_id(msg_end)
             new_share_job[user_id]['end_id'] = end_id
             
+            if start_id > end_id:
+                start_id, end_id = end_id, start_id
+                new_share_job[user_id]['start_id'] = start_id
+                new_share_job[user_id]['end_id'] = end_id
+            
         msg_batch = await _ask(bot, user_id, 
-            "<b>❪ STEP 7: EPISODES PER BUTTON ❫</b>\n\nHow many episodes per link button?\nExample: <code>20</code>", 
+            "<b>❪ STEP 9: EPISODES PER BUTTON ❫</b>\n\nHow many episodes per link button?\nExample: <code>20</code>", 
             reply_markup=markup
         )
         if (msg_batch.text or "") == "/cancel": return await bot.send_message(user_id, "Cancelled.", reply_markup=ReplyKeyboardRemove())
@@ -156,7 +188,7 @@ async def _create_share_flow(bot, user_id):
         new_share_job[user_id]['batch_size'] = batch_size
 
         msg_bpp = await _ask(bot, user_id, 
-            "<b>❪ STEP 8: BUTTONS PER POST ❫</b>\n\nHow many buttons should appear in one post in the channel?\nExample: <code>10</code>", 
+            "<b>❪ STEP 10: BUTTONS PER POST ❫</b>\n\nHow many buttons should appear in one post in the channel?\nExample: <code>10</code>", 
             reply_markup=markup
         )
         if (msg_bpp.text or "") == "/cancel": return await bot.send_message(user_id, "Cancelled.", reply_markup=ReplyKeyboardRemove())
@@ -167,18 +199,21 @@ async def _create_share_flow(bot, user_id):
         new_share_job[user_id]['buttons_per_post'] = bpp
 
         sj = new_share_job[user_id]
-        total_msgs  = (sj['end_id'] - sj['start_id']) + 1
         
+        is_tp = sj.get('is_topic')
+        sub_str = f"<b>Topic ID:</b> {sj.get('topic_id', 'N/A')}\n" if is_tp else f"<b>Msg ID Range:</b> {sj['start_id']} → {sj['end_id']}\n"
+
         markup_conf = ReplyKeyboardMarkup([["Gᴇɴᴇʀᴀᴛᴇ & Pᴏsᴛ Lɪɴᴋs"], ["❌ Cancel"]], resize_keyboard=True, one_time_keyboard=True)
         conf_msg = await _ask(bot, user_id,
             f"<b>📋 CONFIRM SHARE BATCH</b>\n\n"
             f"<b>Story Name:</b> {sj['story']}\n"
-            f"<b>Source ID:</b> <code>{sj['source']}</code>\n"
+            f"<b>Status:</b> {'Completed' if sj.get('is_completed') else 'Ongoing'}\n"
+            f"<b>Source:</b> <code>{sj['source']}</code> ({'Topic' if is_tp else 'Channel'})\n"
             f"<b>Target ID:</b> <code>{sj['target']}</code>\n"
-            f"<b>Msg ID Range:</b> {sj['start_id']} → {sj['end_id']} ({total_msgs} slots)\n"
+            f"{sub_str}"
             f"<b>Episodes/Button:</b> {sj['batch_size']}\n"
             f"<b>Buttons/Post:</b> {sj['buttons_per_post']}\n"
-            f"\n<i>🤖 Smart Parse active: I will read filenames & captions to correctly group duplicates and missing episodes.</i>",
+            f"\n<i>🤖 Smart Parse active: Auto-groups duplicate eps smoothly.</i>",
             reply_markup=markup_conf
         )
         
@@ -288,40 +323,54 @@ async def _build_share_links(bot, user_id, sj, info_msg):
         story          = sj['story']
         SCAN_CHUNK     = 100  # Telegram allows up to 100 IDs per GetMessages call
 
-        # ── PHASE 1: Scan entire range, reading raw objects ──────────
         import re as _re
         all_valid_msgs = []
         total_scanned = 0
 
-        await safe_edit(f"<i>⏳ Scanning and analyzing files {current_id}–{end_ep}...</i>")
+        if sj.get('is_topic'):
+            await safe_edit(f"<i>⏳ Scanning entire Group Topic {sj['topic_id']}...</i>")
+            try:
+                # Iterate all messages inside the topic
+                async for m in bot.get_discussion_replies(sj['source'], sj['topic_id']):
+                    if m and not m.empty:
+                        all_valid_msgs.append(m)
+                    total_scanned += 1
+                    if total_scanned % 100 == 0:
+                        try: await safe_edit(f"<i>⏳ Scanned {total_scanned} files from topic...</i>")
+                        except: pass
+                # get_discussion_replies yields newest to oldest by default, so reverse it
+                all_valid_msgs.reverse()
+            except Exception as e:
+                return await safe_edit(f"<b>❌ Topic Scan Error:</b> <code>{e}</code>")
+        else:
+            await safe_edit(f"<i>⏳ Scanning and analyzing files {current_id}–{end_ep}...</i>")
+            while current_id <= end_ep:
+                chunk_end = min(current_id + SCAN_CHUNK - 1, end_ep)
+                msg_ids   = list(range(current_id, chunk_end + 1))
 
-        while current_id <= end_ep:
-            chunk_end = min(current_id + SCAN_CHUNK - 1, end_ep)
-            msg_ids   = list(range(current_id, chunk_end + 1))
-
-            for attempt in range(6):
-                try:
-                    msgs = await bot.get_messages(sj['source'], msg_ids)
-                    if not isinstance(msgs, list): msgs = [msgs]
-                    
-                    for m in msgs:
-                        if m and not m.empty:
-                            all_valid_msgs.append(m)
-                    break
-                except Exception as e:
-                    err_str = str(e)
-                    if "FLOOD_WAIT" in err_str or "420" in err_str:
-                        mw = _re.search(r'wait of (\d+)', err_str)
-                        wait_secs = (int(mw.group(1)) + 2) if mw else 15
-                        await safe_edit(f"<i>⏳ Flood Wait {wait_secs}s... (scanned {total_scanned})</i>")
-                        await asyncio.sleep(wait_secs)
-                        continue
-                    return await safe_edit(f"<b>❌ Scan Error:</b> <code>{e}</code>")
-            else:
-                return await safe_edit("❌ Scan aborted after 6 retries due to FloodWait.")
-            total_scanned += len(msg_ids)
-            current_id = chunk_end + 1
-            await asyncio.sleep(0.3)
+                for attempt in range(6):
+                    try:
+                        msgs = await bot.get_messages(sj['source'], msg_ids)
+                        if not isinstance(msgs, list): msgs = [msgs]
+                        
+                        for m in msgs:
+                            if m and not m.empty:
+                                all_valid_msgs.append(m)
+                        break
+                    except Exception as e:
+                        err_str = str(e)
+                        if "FLOOD_WAIT" in err_str or "420" in err_str:
+                            mw = _re.search(r'wait of (\d+)', err_str)
+                            wait_secs = (int(mw.group(1)) + 2) if mw else 15
+                            await safe_edit(f"<i>⏳ Flood Wait {wait_secs}s... (scanned {total_scanned})</i>")
+                            await asyncio.sleep(wait_secs)
+                            continue
+                        return await safe_edit(f"<b>❌ Scan Error:</b> <code>{e}</code>")
+                else:
+                    return await safe_edit("❌ Scan aborted after 6 retries due to FloodWait.")
+                total_scanned += len(msg_ids)
+                current_id = chunk_end + 1
+                await asyncio.sleep(0.3)
 
         if not all_valid_msgs:
             return await safe_edit("❌ No files found in that range.")
@@ -675,7 +724,7 @@ async def _build_share_links(bot, user_id, sj, info_msg):
             url = f"https://t.me/{bot_usr}?start={uuid_str}"
             btn_text = str(b_s) if (b_s == b_e or batch_size == 1) else f"{b_s}–{b_e}"
             raw_buttons.append({
-                "btn":      InlineKeyboardButton(btn_text, url=url),
+                "btn":      InlineKeyboardButton(_sc(btn_text), url=url),
                 "ep_start": b_s,
                 "ep_end":   b_e,
             })
@@ -694,7 +743,7 @@ async def _build_share_links(bot, user_id, sj, info_msg):
             )
             url = f"https://t.me/{bot_usr}?start={uuid_str}"
             raw_buttons.append({
-                "btn":      InlineKeyboardButton("📁 Extra/Skipped Files", url=url),
+                "btn":      InlineKeyboardButton("📁 " + _sc("Extra/Skipped Files"), url=url),
                 "ep_start": "Extra",
                 "ep_end":   "Files",
             })
@@ -706,14 +755,14 @@ async def _build_share_links(bot, user_id, sj, info_msg):
             chunk = raw_buttons[i : i + buttons_per_post]
             first_ep = chunk[0]["ep_start"]
             last_ep  = chunk[-1]["ep_end"]
-            txt = f"<b>📂 {story.upper()} | Episodes {first_ep}–{last_ep}</b>"
+            txt = f"<b>📂 {_sc(story)} | {_sc('Episodes')} {first_ep}–{last_ep}</b>"
             keyboard = []
             for j in range(0, len(chunk), 2):
                 row = [c["btn"] for c in chunk[j:j + 2]]
                 keyboard.append(row)
             keyboard.append([
-                InlineKeyboardButton("Tutorial 🎥", url="https://t.me/StoriesLinkopningguide"),
-                InlineKeyboardButton("Support ❓", url="https://t.me/+EAc-6v1bmZ1iMDBl")
+                InlineKeyboardButton(_sc("Tutorial") + " 🎥", url="https://t.me/StoriesLinkopningguide"),
+                InlineKeyboardButton(_sc("Support") + " ❓", url="https://t.me/+EAc-6v1bmZ1iMDBl")
             ])
             for attempt in range(6):
                 try:
@@ -822,12 +871,42 @@ async def _build_share_links(bot, user_id, sj, info_msg):
         report_text = "\n".join(plain_report)
         report_bytes = io.BytesIO(report_text.encode('utf-8'))
         report_bytes.name = f"arya_report_{story.replace(' ','_')}.txt"
+
         try:
-            await bot.send_document(
-                user_id, report_bytes,
-                caption=f"<b>📋 Full report for {story.upper()}</b>",
-                file_name=report_bytes.name
-            )
+            usr_obj = await bot.get_users(user_id)
+            u_name = usr_obj.first_name if usr_obj else "User"
+
+            if sj.get('is_completed'):
+                header = (
+                    f"›› {_sc('Hey!!')}, {u_name}\n\n"
+                    f"➤ {_sc('Purpose of the bot: This bot makes renaming anime and series files easy and stress-free.')}\n\n"
+                    f"‣ {_sc('Maintained by')} : {_sc('Yato')}\n"
+                    f"──────────────────\n"
+                )
+                
+                bot_link = f"<a href='https://t.me/{bot_usr}'>{poster.me.first_name}</a>"
+                story_sz = _sc(story)
+                
+                en_body = _sc(f"This ") + story_sz + _sc(f" is completed by ") + bot_link + _sc(f". I have tried to make everything correct and have also provided you with a final report containing all details. Some episodes may naturally be missing, so please don't panic — nothing can be done about that. But if 10+ episodes are missing, you can complain in support. Some episodes may also be artificially missing, like due to parser issues. I don't think I can do anything about that. Non-logical or unparsed files will be available in your '🗃️ Extra/Skipped files'. Some duplicates are also shown — either they are real duplicates, or the uploader (I have not scraped this from Pocket FM or any other platform; these were forcefully forwarded via Arya bot from some private/public channel/group/bot, so I am not responsible) uploaded multiple files with the same name. So I believe you are intelligent enough to understand this.")
+                
+                hi_body = f"यह {story_sz} {bot_link} द्वारा पूरी कर दी गई है। मैंने सब कुछ सही करने की कोशिश की है और आपको सभी विवरणों के साथ एक अंतिम रिपोर्ट भी प्रदान की है। कुछ एपिसोड स्वाभाविक रूप से गायब हो सकते हैं, इसलिए कृपया घबराएं नहीं — उसका कुछ नहीं किया जा सकता। लेकिन अगर 10+ एपिसोड गायब हैं, तो आप सपोर्ट में शिकायत कर सकते हैं। कुछ एपिसोड कृत्रिम रूप से भी गायब हो सकते हैं, जैसे पार्सर समस्याओं के कारण। मुझे नहीं लगता कि मैं इसके बारे में कुछ भी कर सकता हूँ। गैर-तार्किक या अनपार्स की गई फ़ाइलें आपके '🗃️ Extra/Skipped files' में उपलब्ध होंगी। कुछ डुप्लिकेट भी दिखाए गए हैं — या तो वे वास्तविक डुप्लिकेट हैं, या अपलोडर ने (मैंने इसे पॉकेट एफएम या किसी अन्य प्लेटफॉर्म से स्क्रैप नहीं किया है; इन्हें आर्या बॉट के माध्यम से किसी निजी/सार्वजनिक चैनल/समूह/बॉट से जबरदस्ती अग्रेषित किया गया था, इसलिए मैं जिम्मेदार नहीं हूं) एक ही नाम से कई फाइलें अपलोड की हैं। इसलिए मुझे विश्वास है कि आप इसे समझने के लिए पर्याप्त बुद्धिमान हैं।"
+
+                final_cap = f"<blockquote expandable>{header}{en_body}</blockquote>\n\n<blockquote expandable>{hi_body}</blockquote>"
+                
+                await bot.send_document(
+                    user_id, report_bytes,
+                    caption=final_cap,
+                    file_name=report_bytes.name
+                )
+            else:
+                ongoing_msg = _sc("Hey, I have posted all the files currently available with me. If any new episode comes, I will post it. Enjoy 🫶🏻.")
+                final_cap = f"<blockquote expandable>{ongoing_msg}</blockquote>"
+                await bot.send_document(
+                    user_id, report_bytes,
+                    caption=final_cap,
+                    file_name=report_bytes.name
+                )
+
         except Exception as rep_err:
             logger.warning(f"Could not send report file: {rep_err}")
 
