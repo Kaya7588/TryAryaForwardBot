@@ -732,18 +732,24 @@ async def _build_share_links(bot, user_id, sj, info_msg):
                 "ep_end":   b_e,
             })
 
-        # ── Compute final skipped count (after gap-fill) ─────────────────────
+        # ── Extra/Skipped Files button ─────────────────────────────────────────
+        # Use ALL messages that had no parseable episode number in pass 2.
+        # Even if gap-fill assigned some to episode slots, the user gets access
+        # to ALL of them here so nothing is ever unreachable.
         added_msg_ids = set()
         for mids in ep_to_msgs.values():
             added_msg_ids.update(mids)
-
         truly_skipped_msgs = [m for m in all_valid_msgs if m.id not in added_msg_ids]
         final_skipped_count = len(truly_skipped_msgs)
 
-        if truly_skipped_msgs:
+        # Reconstruct the full set of originally-unparseable messages from pass 2
+        parsed_ids = {msg.id for msg, *_ in parsed_msgs}
+        all_originally_unparseable = [m for m in all_valid_msgs if m.id not in parsed_ids]
+
+        if all_originally_unparseable:
             uuid_str = str(uuid.uuid4()).replace('-', '')[:16]
             await db.save_share_link(
-                uuid_str, [m.id for m in truly_skipped_msgs], source_chat_id,
+                uuid_str, [m.id for m in all_originally_unparseable], source_chat_id,
                 protect=protect, access_hash=db_access_hash
             )
             url = f"https://t.me/{bot_usr}?start={uuid_str}"
@@ -752,6 +758,7 @@ async def _build_share_links(bot, user_id, sj, info_msg):
                 "ep_start": "Extra",
                 "ep_end":   "Files",
             })
+
 
         #  PHASE 3: Post to target channel 
         post_count = 0
@@ -882,7 +889,8 @@ async def _build_share_links(bot, user_id, sj, info_msg):
         try:
             usr_obj = await bot.get_users(user_id)
             u_name = usr_obj.first_name if usr_obj else "User"
-            bot_link = f"<a href='https://t.me/{bot_usr}'>{poster.me.first_name}</a>"
+            poster_me = await poster.get_me()
+            bot_link = f"<a href='https://t.me/{bot_usr}'>{poster_me.first_name}</a>"
             story_sz = _sc(story)
 
             if sj.get('is_completed'):
