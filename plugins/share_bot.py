@@ -397,8 +397,12 @@ async def _send_welcome(client, message, bot_id: str = None):
             await client.send_photo(user.id, photo=welcome_img, caption=txt, reply_markup=markup)
         else:
             await message.reply_text(txt, reply_markup=markup)
-    except Exception:
-        await message.reply_text(txt, reply_markup=markup)
+    except Exception as _wel_err:
+        logger.warning(f"[Welcome] Image send failed ({_wel_err}), falling back to text")
+        try:
+            await message.reply_text(txt, reply_markup=markup)
+        except Exception:
+            pass
 
 
 async def _send_help(client, message, bot_id: str = None):

@@ -25,9 +25,9 @@ async def _sb_set_text_flow(bot, user_id, query, b_id: str, key: str,
         resp = await bot.listen(chat_id=user_id, timeout=300)
         txt = resp.text or resp.caption or ""
         await resp.delete()
-        if txt.strip() == "/cancel":
+        if txt.strip().lower() in ("/cancel", "cancel"):
             return await ask.edit_text(
-                "Cancelled.",
+                "»  Cancelled.",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("«  ʙᴀᴄᴋ", callback_data=back_cb)]])
             )
         if txt.strip() == "/reset":
@@ -431,9 +431,9 @@ async def settings_query(bot, query):
           # ─── Welcome & About (grouped) ───────────────────────────
           [
               InlineKeyboardButton('»  ᴡᴇʟᴄᴏᴍᴇ ᴍꜱɢ',    callback_data=f"settings#sb_set_welcome_{b_id}"),
-              InlineKeyboardButton('🖼  ᴡᴇʟᴄᴏᴍᴇ ɪᴍɢ',    callback_data=f"settings#sb_set_welcome_img_{b_id}"),
+              InlineKeyboardButton('🖼  ᴡᴇʟᴄᴏᴍᴇ ɪᴍɢ',  callback_data=f"settings#sb_set_welcome_img_{b_id}"),
+              InlineKeyboardButton('‣  ᴀʙᴏᴜᴛ',        callback_data=f"settings#sb_about_{b_id}"),
           ],
-          [InlineKeyboardButton('‣  ᴀʙᴏᴜᴛ ꜱᴇᴄᴛɪᴏɴ',      callback_data=f"settings#sb_about_{b_id}")],
           # ─── Other messages ───────────────────────────────────────
           [
               InlineKeyboardButton('»  ᴅᴇʟᴇᴛᴇ ᴍꜱɢ',      callback_data=f"settings#sb_set_delete_{b_id}"),
@@ -472,10 +472,10 @@ async def settings_query(bot, query):
       try:
           resp = await bot.listen(chat_id=user_id, timeout=120)
 
-          if resp.text and resp.text.strip() == "/cancel":
+          if resp.text and resp.text.strip().lower() in ("/cancel", "cancel"):
               await resp.delete()
               return await ask.edit_text(
-                  "Cancelled.",
+                  "»  Cancelled.",
                   reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("«  ʙᴀᴄᴋ", callback_data=f"settings#sb_view_{b_id}")]])
               )
 
