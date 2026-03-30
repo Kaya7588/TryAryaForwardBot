@@ -1600,24 +1600,28 @@ async def _create_flow(bot, uid, mtype="audio"):
             
             # Start UI clone bot for scan so we don't hit Pyrogram channel invalid error 
             ui_client = await start_clone_bot(_CLIENT.client(acc))
-            await _safe_resolve_peer(ui_client, ch_id)
-            
-            for i in range(0, len(msg_ids), 200):
-                chunk = msg_ids[i:i + 200]
-                msgs = await ui_client.get_messages(ch_id, chunk)
-                if not isinstance(msgs, list): msgs = [msgs]
-                for m_ in msgs:
-                    if not m_ or m_.empty: continue
-                    media_obj = None
-                    for attr in ('audio', 'video', 'document', 'voice', 'video_note'):
-                        media_obj = getattr(m_, attr, None)
-                        if media_obj: break
-                    if media_obj:
-                        tot_bytes += getattr(media_obj, 'file_size', 0) or 0
-                        dur = getattr(media_obj, 'duration', 0) or 0
-                        tot_secs += dur
-                        valid_count += 1
-            if scan_msg: await scan_msg.delete()
+            try:
+                await _safe_resolve_peer(ui_client, ch_id)
+                
+                for i in range(0, len(msg_ids), 200):
+                    chunk = msg_ids[i:i + 200]
+                    msgs = await ui_client.get_messages(ch_id, chunk)
+                    if not isinstance(msgs, list): msgs = [msgs]
+                    for m_ in msgs:
+                        if not m_ or m_.empty: continue
+                        media_obj = None
+                        for attr in ('audio', 'video', 'document', 'voice', 'video_note'):
+                            media_obj = getattr(m_, attr, None)
+                            if media_obj: break
+                        if media_obj:
+                            tot_bytes += getattr(media_obj, 'file_size', 0) or 0
+                            dur = getattr(media_obj, 'duration', 0) or 0
+                            tot_secs += dur
+                            valid_count += 1
+                if scan_msg: await scan_msg.delete()
+            finally:
+                try: await ui_client.stop()
+                except: pass
         except Exception as e:
             if scan_msg:
                 try: await scan_msg.edit_text(f"<i>Scan partial/failed: {e}</i>")
