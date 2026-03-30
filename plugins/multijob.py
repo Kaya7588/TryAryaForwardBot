@@ -33,11 +33,11 @@ from pyrogram.types import (
 logger = logging.getLogger(__name__)
 _CLIENT = CLIENT()
 
-# ─── In-memory task registry ──────────────────────────────────────────────────
+#  In-memory task registry 
 _mj_tasks:  dict[str, asyncio.Task]  = {}
 _mj_paused: dict[str, asyncio.Event] = {}   # set=running, clear=paused
 
-# ─── Future-based ask() — immune to pyrofork stale-listener bug ──────────────
+#  Future-based ask() — immune to pyrofork stale-listener bug 
 _mj_waiting: dict[int, asyncio.Future] = {}
 
 
@@ -322,18 +322,18 @@ async def _run_multijob(job_id: str, user_id: int, bot=None):
         sleep_secs     = max(1, int(configs.get('duration', 1) or 1))
         replacements   = configs.get('replacements', {})
 
-        # ── Destination progress bar ────────────────────────────────────────
+        #  Destination progress bar 
         def _mj_prog_text(fwd: int, total: int, status: str = "running") -> str:
             pct = min(int(fwd * 100 / total), 100) if total > 0 else 0
             bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
             if status == "done":
-                head = "✅ <b>Multi Job Complete!</b>"
+                head = "»  <b>Multi Job Complete!</b>"
                 body = f"<b>All {fwd} files forwarded successfully.</b>"
             elif status == "stopped":
                 head = "⏹ <b>Multi Job Stopped</b>"
                 body = f"<b>Stopped at {fwd} / {total if total else '?'} files.</b>"
             elif status == "error":
-                head = "⚠️ <b>Multi Job Error</b>"
+                head = "‣  <b>Multi Job Error</b>"
                 body = f"<b>Failed after forwarding {fwd} files.</b>"
             else:
                 head = "📤 <b>Multi Job Running — please wait…</b>"
@@ -360,7 +360,7 @@ async def _run_multijob(job_id: str, user_id: int, bot=None):
         mj_last_prog_update = 0.0
         mj_start_time = time.time()
         mj_fwd_at_start = int(job.get("forwarded", 0))
-        # ───────────────────────────────────────────────────────────────────
+        # 
 
 
         while True:
@@ -402,7 +402,7 @@ async def _run_multijob(job_id: str, user_id: int, bot=None):
                     try:
                         await bot.send_message(
                             user_id,
-                            f"<b>✅ Multi Job Complete!</b>\n\n"
+                            f"<b>»  Multi Job Complete!</b>\n\n"
                             f"<b>Name:</b> {done_job.get('name', job_id[-6:])}\n"
                             f"<b>Source:</b> {done_job.get('from_title','?')}\n"
                             f"<b>Dest:</b> {done_job.get('to_title','?')}\n"
@@ -495,7 +495,7 @@ async def _run_multijob(job_id: str, user_id: int, bot=None):
                         try:
                             await bot.send_message(
                                 user_id,
-                                f"<b>✅ Multi Job Complete!</b>\n\n"
+                                f"<b>»  Multi Job Complete!</b>\n\n"
                                 f"<b>Name:</b> {done_job2.get('name', job_id[-6:])}\n"
                                 f"<b>Source:</b> {done_job2.get('from_title','?')}\n"
                                 f"<b>Dest:</b> {done_job2.get('to_title','?')}\n"
@@ -546,7 +546,7 @@ async def _run_multijob(job_id: str, user_id: int, bot=None):
             current = valid[-1].id + 1
             await _mj_update(job_id, current_id=current)
 
-            # ── Update destination progress bar (every 30s) ──────────────
+            #  Update destination progress bar (every 30s) 
             now_mj = time.time()
             if mj_prog_msg_id and (now_mj - mj_last_prog_update) >= 30:
                 mj_last_prog_update = now_mj
@@ -574,7 +574,7 @@ async def _run_multijob(job_id: str, user_id: int, bot=None):
                         f"📤 <b>Multi Job Running — please wait…</b>\n\n"
                         f"<code>[{_bar}]</code>  <b>{_pct}%</b>\n"
                         f"<b>Files:</b> <code>{_fwd}</code> / <code>{end_id if end_id > 0 else '?'}</code>\n"
-                        f"⏳ <b>ETA:</b> {_eta_str}\n\n"
+                        f"»  <b>ETA:</b> {_eta_str}\n\n"
                         f"<i>Powered by Arya Forward Bot</i>"
                     )
                     await client.edit_message_text(to_chat, mj_prog_msg_id, _prog_txt, parse_mode="html")
@@ -645,8 +645,8 @@ async def resume_multi_jobs(user_id: int = None, bot=None):
 def _mj_emoji(status: str) -> str:
     return {
         "running": "🟢", "paused": "⏸",
-        "stopped": "🔴", "done": "✅", "error": "⚠️"
-    }.get(status, "❓")
+        "stopped": "🔴", "done": "» ", "error": "‣ "
+    }.get(status, "» ")
 
 
 async def _render_mj_list(bot, user_id: int, msg_or_query):
@@ -655,23 +655,23 @@ async def _render_mj_list(bot, user_id: int, msg_or_query):
 
     if not jobs:
         text = (
-            "<b>⚡ Multi Jobs</b>\n\n"
+            "<b>»  Multi Jobs</b>\n\n"
             "<i>No jobs yet.\n\n"
             "A <b>Multi Job</b> copies a specific range of messages from any "
             "source channel/group to your target — fully in the background.\n\n"
-            "✅ All source types (public, private, DMs, topics)\n"
-            "✅ Dual destinations\n"
-            "✅ Multiple jobs run simultaneously\n"
-            "✅ Pause / Resume support\n"
-            "✅ Survives bot restarts\n\n"
+            "»  All source types (public, private, DMs, topics)\n"
+            "»  Dual destinations\n"
+            "»  Multiple jobs run simultaneously\n"
+            "»  Pause / Resume support\n"
+            "»  Survives bot restarts\n\n"
             "👇 Create your first Multi Job below!</i>"
         )
         btns = InlineKeyboardMarkup([
-            [InlineKeyboardButton("➕ Cʀᴇᴀᴛᴇ Mᴜʟᴛɪ Jᴏʙ", callback_data="mj#new")],
+            [InlineKeyboardButton("»  Cʀᴇᴀᴛᴇ Mᴜʟᴛɪ Jᴏʙ", callback_data="mj#new")],
             [InlineKeyboardButton("⫷ Bᴀᴄᴋ", callback_data="back")]
         ])
     else:
-        lines = ["<b>⚡ Your Multi Jobs</b>\n"]
+        lines = ["<b>»  Your Multi Jobs</b>\n"]
         for j in jobs:
             st   = _mj_emoji(j.get("status", "stopped"))
             fwd  = j.get("forwarded", 0)
@@ -686,7 +686,7 @@ async def _render_mj_list(bot, user_id: int, msg_or_query):
             lines.append(
                 f"{st} <b>{name}</b>\n"
                 f"  └ <i>{j.get('from_title','?')} → {j.get('to_title','?')}{d2}</i>\n"
-                f"  └ <code>[{j['job_id'][-6:]}]</code>  ✅{fwd}  ⬇️{fetched}  📍{cur}/{end}{err}\n"
+                f"  └ <code>[{j['job_id'][-6:]}]</code>  » {fwd}  » {fetched}  » {cur}/{end}{err}\n"
             )
         import datetime
         now_str = datetime.datetime.now().strftime("%I:%M:%S %p")
@@ -702,17 +702,17 @@ async def _render_mj_list(bot, user_id: int, msg_or_query):
                 row.append(InlineKeyboardButton(f"⏸ Pᴀᴜsᴇ [{short}]", callback_data=f"mj#pause#{jid}"))
                 row.append(InlineKeyboardButton(f"⏹ Sᴛᴏᴘ [{short}]", callback_data=f"mj#stop#{jid}"))
             elif st == "paused":
-                row.append(InlineKeyboardButton(f"▶️ Rᴇsᴜᴍᴇ [{short}]", callback_data=f"mj#resume#{jid}"))
+                row.append(InlineKeyboardButton(f"»  Rᴇsᴜᴍᴇ [{short}]", callback_data=f"mj#resume#{jid}"))
                 row.append(InlineKeyboardButton(f"⏹ Sᴛᴏᴘ [{short}]", callback_data=f"mj#stop#{jid}"))
             else:
-                row.append(InlineKeyboardButton(f"▶️ Sᴛᴀʀᴛ [{short}]", callback_data=f"mj#start#{jid}"))
-            row.append(InlineKeyboardButton(f"ℹ️ Iɴғᴏ [{short}]", callback_data=f"mj#info#{jid}"))
+                row.append(InlineKeyboardButton(f"»  Sᴛᴀʀᴛ [{short}]", callback_data=f"mj#start#{jid}"))
+            row.append(InlineKeyboardButton(f"»  Iɴғᴏ [{short}]", callback_data=f"mj#info#{jid}"))
             row.append(InlineKeyboardButton(f"✏️ Nᴀᴍᴇ [{short}]", callback_data=f"mj#rename#{jid}"))
-            row.append(InlineKeyboardButton(f"🗑 Dᴇʟᴇᴛᴇ [{short}]",  callback_data=f"mj#del#{jid}"))
+            row.append(InlineKeyboardButton(f"»  Dᴇʟᴇᴛᴇ [{short}]",  callback_data=f"mj#del#{jid}"))
             btns_list.append(row)
 
-        btns_list.append([InlineKeyboardButton("➕ Cʀᴇᴀᴛᴇ Mᴜʟᴛɪ Jᴏʙ", callback_data="mj#new")])
-        btns_list.append([InlineKeyboardButton("🔄 Rᴇғʀᴇsʜ",           callback_data="mj#list")])
+        btns_list.append([InlineKeyboardButton("»  Cʀᴇᴀᴛᴇ Mᴜʟᴛɪ Jᴏʙ", callback_data="mj#new")])
+        btns_list.append([InlineKeyboardButton("»  Rᴇғʀᴇsʜ",           callback_data="mj#list")])
         btns_list.append([InlineKeyboardButton("⫷ Bᴀᴄᴋ", callback_data="back")])
         btns = InlineKeyboardMarkup(btns_list)
 
@@ -753,7 +753,7 @@ async def mj_rename_cb(bot, query):
         reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/cancel")]], resize_keyboard=True, one_time_keyboard=True))
     if "/cancel" not in r.text.lower():
         await db.db[COLL].update_one({"job_id": job_id}, {"$set": {"name": r.text.strip()[:100]}})
-        await bot.send_message(user_id, f"✅ Multi Job renamed to <b>{r.text.strip()[:100]}</b>", reply_markup=ReplyKeyboardRemove())
+        await bot.send_message(user_id, f"»  Multi Job renamed to <b>{r.text.strip()[:100]}</b>", reply_markup=ReplyKeyboardRemove())
     await _render_mj_list(bot, user_id, r)
 
 
@@ -788,7 +788,7 @@ async def mj_info_cb(bot, query):
         dest2_lbl = f"\n<b>Dest 2:</b> {job.get('to_title_2','?')}{tp2}"
 
     text = (
-        f"<b>⚡ Multi Job Info</b>\n\n"
+        f"<b>»  Multi Job Info</b>\n\n"
         f"<b>ID:</b> <code>{job_id[-6:]}</code>\n"
         f"<b>Name:</b> {job.get('name', 'Default')}\n"
         f"<b>Status:</b> {st} {job.get('status','?')}\n"
@@ -801,10 +801,10 @@ async def mj_info_cb(bot, query):
         f"<b>Created:</b> {created}\n"
     )
     if job.get("error"):
-        text += f"\n<b>⚠️ Error:</b> <code>{job['error']}</code>"
+        text += f"\n<b>‣  Error:</b> <code>{job['error']}</code>"
 
     await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[
-        InlineKeyboardButton("↩ Bᴀᴄᴋ", callback_data="mj#list")
+        InlineKeyboardButton("«  Bᴀᴄᴋ", callback_data="mj#list")
     ]]))
 
 
@@ -834,11 +834,11 @@ async def mj_resume_cb(bot, query):
     if ev and job_id in _mj_tasks and not _mj_tasks[job_id].done():
         ev.set()
         await _mj_update(job_id, status="running")
-        await query.answer("▶️ Resumed!", show_alert=False)
+        await query.answer("»  Resumed!", show_alert=False)
     else:
         await _mj_update(job_id, status="running")
         _mj_start_task(job_id, user_id)
-        await query.answer("▶️ Restarted from saved position!", show_alert=False)
+        await query.answer("»  Restarted from saved position!", show_alert=False)
     await _render_mj_list(bot, user_id, query)
 
 
@@ -870,7 +870,7 @@ async def mj_start_cb(bot, query):
         return await query.answer("Already running!", show_alert=True)
     await _mj_update(job_id, status="running")
     _mj_start_task(job_id, user_id)
-    await query.answer("▶️ Job started!", show_alert=False)
+    await query.answer("»  Job started!", show_alert=False)
     await _render_mj_list(bot, user_id, query)
 
 
@@ -887,7 +887,7 @@ async def mj_del_cb(bot, query):
     ev = _mj_paused.pop(job_id, None)
     if ev: ev.set()
     await _mj_delete(job_id)
-    await query.answer("🗑 Job deleted.", show_alert=False)
+    await query.answer("»  Job deleted.", show_alert=False)
     await _render_mj_list(bot, user_id, query)
 
 
@@ -941,9 +941,9 @@ async def _create_mj_flow(bot, user_id: int):
     if old and not old.done():
         old.cancel()
 
-    # ── Step 1: Name ──────────────────────────────────────────────────────────
+    #  Step 1: Name 
     name_r = await _mj_ask(bot, user_id,
-        "<b>⚡ Create Multi Job — Step 1/6</b>\n\n"
+        "<b>»  Create Multi Job — Step 1/6</b>\n\n"
         "Send a name for this job, or press 'Default' to use a random name.",
         reply_markup=ReplyKeyboardMarkup([[KeyboardButton("Default")], [KeyboardButton("/cancel")]], resize_keyboard=True, one_time_keyboard=True))
     if "/cancel" in name_r.text:
@@ -953,20 +953,20 @@ async def _create_mj_flow(bot, user_id: int):
     if job_name.lower() == "default":
         job_name = None
 
-    # ── Step 2: Account ───────────────────────────────────────────────────────
+    #  Step 2: Account 
     accounts = await db.get_bots(user_id)
     if not accounts:
         return await bot.send_message(user_id,
-            "<b>❌ No accounts found. Add one in /settings → Accounts first.</b>")
+            "<b>‣  No accounts found. Add one in /settings → Accounts first.</b>")
 
     acc_btns = [[KeyboardButton(
-        f"{'🤖 Bot' if a.get('is_bot', True) else '👤 Userbot'}: "
+        f"{'»  Bot' if a.get('is_bot', True) else '»  Userbot'}: "
         f"{a.get('username') or a.get('name', 'Unknown')} [{a['id']}]"
     )] for a in accounts]
     acc_btns.append([KeyboardButton("/cancel")])
 
     acc_r = await _mj_ask(bot, user_id,
-        "<b>⚡ Create Multi Job — Step 2/5</b>\n\n"
+        "<b>»  Create Multi Job — Step 2/5</b>\n\n"
         "Choose which account to use:\n"
         "<i>(Userbot required for private/restricted channels)</i>",
         reply_markup=ReplyKeyboardMarkup(acc_btns, resize_keyboard=True, one_time_keyboard=True))
@@ -981,7 +981,7 @@ async def _create_mj_flow(bot, user_id: int):
     sel_acc = (await db.get_bot(user_id, acc_id)) if acc_id else accounts[0]
     is_bot  = sel_acc.get("is_bot", True)
 
-    # ── Step 3: Source ────────────────────────────────────────────────────────
+    #  Step 3: Source 
     src_r = await _mj_ask(bot, user_id,
         "<b>Step 3/5 — Source Chat</b>\n\n"
         "Send one of:\n"
@@ -998,7 +998,7 @@ async def _create_mj_flow(bot, user_id: int):
     if from_chat_raw.lower() in ("me", "saved"):
         if is_bot:
             return await bot.send_message(user_id,
-                "<b>❌ Saved Messages require a Userbot account.</b>",
+                "<b>‣  Saved Messages require a Userbot account.</b>",
                 reply_markup=ReplyKeyboardRemove())
         from_chat  = "me"
         from_title = "Saved Messages"
@@ -1024,11 +1024,11 @@ async def _create_mj_flow(bot, user_id: int):
 
     from_thread = await _mj_ask_topic(bot, user_id, "Source")
 
-    # ── Step 4: Primary Destination ───────────────────────────────────────────
+    #  Step 4: Primary Destination 
     channels = await db.get_user_channels(user_id)
     if not channels:
         return await bot.send_message(user_id,
-            "<b>❌ No target channels saved. Add via /settings → Channels.</b>",
+            "<b>‣  No target channels saved. Add via /settings → Channels.</b>",
             reply_markup=ReplyKeyboardRemove())
 
     to_chat, to_title, cancelled = await _mj_ask_dest(bot, user_id, channels,
@@ -1038,7 +1038,7 @@ async def _create_mj_flow(bot, user_id: int):
 
     to_thread = await _mj_ask_topic(bot, user_id, "Destination")
 
-    # ── Step 5: Message Range ─────────────────────────────────────────────────
+    #  Step 5: Message Range 
     range_r = await _mj_ask(bot, user_id,
         "<b>Step 5/5 — Message Range</b>\n\n"
         "Choose which messages to copy:\n\n"
@@ -1065,7 +1065,7 @@ async def _create_mj_flow(bot, user_id: int):
             try: start_id = int(rtext)
             except Exception: pass
 
-    # ── Save & Start ──────────────────────────────────────────────────────────
+    #  Save & Start 
     job_id = f"mj-{user_id}-{int(time.time())}"
     job = {
         "job_id":         job_id,
@@ -1095,9 +1095,9 @@ async def _create_mj_flow(bot, user_id: int):
 
     await bot.send_message(
         user_id,
-        f"<b>✅ Multi Job Created & Started!</b>\n\n"
-        f"⚡ <b>{from_title}</b> → <b>{to_title}</b>{thread_lbl}\n"
-        f"<b>Account:</b> {'🤖 Bot' if is_bot else '👤 Userbot'}: {sel_acc.get('name','?')}\n"
+        f"<b>»  Multi Job Created & Started!</b>\n\n"
+        f"»  <b>{from_title}</b> → <b>{to_title}</b>{thread_lbl}\n"
+        f"<b>Account:</b> {'»  Bot' if is_bot else '»  Userbot'}: {sel_acc.get('name','?')}\n"
         f"<b>Range:</b> From ID <code>{start_id}</code> · {end_lbl}\n"
         f"<b>Job ID:</b> <code>{job_id[-6:]}</code>\n\n"
         f"<i>Running in background.\nUse /multijob to manage.</i>",

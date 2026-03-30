@@ -13,10 +13,10 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, InputMedi
 async def _main_buttons(user_id: int):
     lang = await db.get_language(user_id)
     return [
-        [InlineKeyboardButton('📢 Main Channel',   url='https://t.me/MeJeetX')],
+        [InlineKeyboardButton('»  ᴍᴀɪɴ ᴄʜᴀɴɴᴇʟ',   url='https://t.me/MeJeetX')],
         [
-            InlineKeyboardButton('💬 Support Group', url='https://t.me/+1p2hcQ4ZaupjNjI1'),
-            InlineKeyboardButton('📜 Sᴛᴀᴛᴜs',       callback_data='status'),
+            InlineKeyboardButton('»  ꜱᴜᴘᴘᴏʀᴛ ɢʀᴏᴜᴘ', url='https://t.me/+1p2hcQ4ZaupjNjI1'),
+            InlineKeyboardButton('»  ꜱᴛᴀᴛᴜꜱ',       callback_data='status'),
         ],
         [
             InlineKeyboardButton(_tx(lang, 'btn_help'),  callback_data='help'),
@@ -27,29 +27,29 @@ async def _main_buttons(user_id: int):
             InlineKeyboardButton(_tx(lang, 'btn_jobs'),     callback_data='job#list'),
         ],
         [
-            InlineKeyboardButton('⚡ Mᴜʟᴛɪ Jᴏʙ',    callback_data='mj#list'),
-            InlineKeyboardButton('🔗 Sʜᴀʀᴇ Bᴀᴛᴄʜ Lɪɴᴋs', callback_data='sl#start'),
+            InlineKeyboardButton('»  ᴍᴜʟᴛɪ ᴊᴏʙ',    callback_data='mj#list'),
+            InlineKeyboardButton('»  ʙᴀᴛᴄʜ ʟɪɴᴋꜱ', callback_data='sl#start'),
         ],
     ]
 
-# ── static fallback used before user_id is available ──────────────────────
+#  static fallback used before user_id is available 
 _STATIC_BUTTONS = [
-    [InlineKeyboardButton('📢 Main Channel',   url='https://t.me/MeJeetX')],
+    [InlineKeyboardButton('»  ᴍᴀɪɴ ᴄʜᴀɴɴᴇʟ',   url='https://t.me/MeJeetX')],
     [
-        InlineKeyboardButton('💬 Support Group', url='https://t.me/+1p2hcQ4ZaupjNjI1'),
-        InlineKeyboardButton('📜 Sᴛᴀᴛᴜs',       callback_data='status'),
+        InlineKeyboardButton('»  ꜱᴜᴘᴘᴏʀᴛ ɢʀᴏᴜᴘ', url='https://t.me/+1p2hcQ4ZaupjNjI1'),
+        InlineKeyboardButton('»  ꜱᴛᴀᴛᴜꜱ',       callback_data='status'),
     ],
     [
-        InlineKeyboardButton('🙋‍♂️ Help',  callback_data='help'),
-        InlineKeyboardButton('💁‍♂️ About', callback_data='about'),
+        InlineKeyboardButton('»  ʜᴇʟᴘ',  callback_data='help'),
+        InlineKeyboardButton('»  ᴀʙᴏᴜᴛ', callback_data='about'),
     ],
     [
-        InlineKeyboardButton('⚙️ Sᴇᴛᴛɪɴɢs ⚙️', callback_data='settings#main'),
-        InlineKeyboardButton('📋 Lɪᴠᴇ Jᴏʙs',    callback_data='job#list'),
+        InlineKeyboardButton('»  ꜱᴇᴛᴛɪɴɢꜱ » ', callback_data='settings#main'),
+        InlineKeyboardButton('»  ʟɪᴠᴇ ᴊᴏʙꜱ',    callback_data='job#list'),
     ],
     [
-        InlineKeyboardButton('⚡ Mᴜʟᴛɪ Jᴏʙ',    callback_data='mj#list'),
-        InlineKeyboardButton('🔗 Sʜᴀʀᴇ Bᴀᴛᴄʜ Lɪɴᴋs', callback_data='sl#start'),
+        InlineKeyboardButton('»  ᴍᴜʟᴛɪ ᴊᴏʙ',    callback_data='mj#list'),
+        InlineKeyboardButton('»  ʙᴀᴛᴄʜ ʟɪɴᴋꜱ', callback_data='sl#start'),
     ],
 ]
 
@@ -88,7 +88,7 @@ async def start(client, message):
 async def restart(client, message):
     msg = await message.reply_text(text="<i>Trying to restarting.....</i>")
     await asyncio.sleep(5)
-    await msg.edit("<i>Server restarted successfully ✅</i>")
+    await msg.edit("<i>Server restarted successfully » </i>")
     os.execl(sys.executable, sys.executable, *sys.argv)
 
 # ==================Callback Functions==================
@@ -100,9 +100,9 @@ async def helpcb(bot, query):
     await query.message.edit_text(
         text=_tx(lang, 'HELP_TXT'),
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton('ʜᴏᴡ ᴛᴏ ᴜsᴇ ᴍᴇ ❓', callback_data='how_to_use')],
-            [InlineKeyboardButton('⚙️ sᴇᴛᴛɪɴɢs', callback_data='settings#main')],
-            [InlineKeyboardButton('↩ ʙᴀᴄᴋ', callback_data='back')],
+            [InlineKeyboardButton('ʜᴏᴡ ᴛᴏ ᴜꜱᴇ ᴍᴇ » ', callback_data='how_to_use')],
+            [InlineKeyboardButton('»  ꜱᴇᴛᴛɪɴɢꜱ', callback_data='settings#main')],
+            [InlineKeyboardButton('«  ʙᴀᴄᴋ', callback_data='back')],
         ])
     )
 
@@ -112,7 +112,7 @@ async def how_to_use(bot, query):
     lang = await db.get_language(user_id)
     await query.message.edit_text(
         text=_tx(lang, 'HOW_USE_TXT'),
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩ Back', callback_data='help')]]),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('«  ʙᴀᴄᴋ', callback_data='help')]]),
         disable_web_page_preview=True,
     )
 
@@ -198,8 +198,8 @@ async def about(bot, query):
     await query.message.edit_text(
         text=_tx(lang, 'ABOUT_TXT', python_version=python_version(), bot_version=get_bot_version()),
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton('🆕 Wʜᴀᴛ\'s Nᴇᴡ', callback_data='whatsnew')],
-            [InlineKeyboardButton('↩ Bᴀᴄᴋ', callback_data='back')]
+            [InlineKeyboardButton('»  ᴡʜᴀᴛ\'s Nᴇᴡ', callback_data='whatsnew')],
+            [InlineKeyboardButton('«  ʙᴀᴄᴋ', callback_data='back')]
         ]),
         disable_web_page_preview=True,
         parse_mode=enums.ParseMode.HTML,
@@ -207,10 +207,10 @@ async def about(bot, query):
 
 @Client.on_callback_query(filters.regex(r'^whatsnew'))
 async def whats_new(bot, query):
-    text = f"<b><u>🆕 WHAT'S NEW (Latest Updates)</u></b>\n\n{get_whats_new()}"
+    text = f"<b><u>»  WHAT'S NEW (Latest Updates)</u></b>\n\n{get_whats_new()}"
     await query.message.edit_text(
         text=text,
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩ Bᴀᴄᴋ', callback_data='about')]]),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('«  ʙᴀᴄᴋ', callback_data='about')]]),
         disable_web_page_preview=True,
         parse_mode=enums.ParseMode.HTML,
     )
@@ -292,7 +292,7 @@ async def status(bot, query):
 
     await query.message.edit_text(
         text=_tx(lang, 'STATUS_TXT', **kwargs),
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('↩ Bᴀᴄᴋ', callback_data='back')]]),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('«  ʙᴀᴄᴋ', callback_data='back')]]),
         parse_mode=enums.ParseMode.HTML,
         disable_web_page_preview=True,
     )
@@ -304,7 +304,7 @@ async def status(bot, query):
 @Client.on_message(filters.private & filters.command("resetstats") & filters.user(Config.BOT_OWNER_ID))
 async def reset_stats(bot, message):
     await db.reset_global_stats()
-    await message.reply_text("✅ Global Stats successfully reset.")
+    await message.reply_text("»  Global Stats successfully reset.")
 
 @Client.on_message(filters.private & filters.command("stats") & filters.user(Config.BOT_OWNER_ID))
 async def owner_stats(bot, message):
@@ -330,18 +330,18 @@ async def owner_stats(bot, message):
         in_memory_tasks = "N/A"
 
     text = (
-        "<b>╭─────❰ 📊 Owner Stats ❱─────╮</b>\n"
-        "<b>┃</b>\n"
-        f"<b>┣⊸ 👥 Total Users     :</b> <code>{total_users}</code>\n"
-        f"<b>┣⊸ 📡 Active Forwards  :</b> <code>{active_forwarding}</code>\n"
-        f"<b>┣⊸ 🟢 Active Live Jobs :</b> <code>{active_jobs}</code>  <i>(tasks: {in_memory_tasks})</i>\n"
-        f"<b>┣⊸ 🤖 Bot Accounts     :</b> <code>{bots_count}</code>\n"
-        f"<b>┣⊸ 📢 Channels Saved   :</b> <code>{total_channels_cnt}</code>\n"
-        f"<b>┣⊸ 🚫 Banned Users     :</b> <code>{len(temp.BANNED_USERS)}</code>\n"
-        "<b>┃</b>\n"
-        f"<b>┣⊸ ⏱ Uptime            :</b> <code>{uptime}</code>\n"
-        "<b>┃</b>\n"
-        "<b>╰──────────────────────────╯</b>"
+        "<b> »  Owner Stats </b>\n"
+        "<b></b>\n"
+        f"<b>  👥 Total Users     :</b> <code>{total_users}</code>\n"
+        f"<b>  📡 Active Forwards  :</b> <code>{active_forwarding}</code>\n"
+        f"<b>  🟢 Active Live Jobs :</b> <code>{active_jobs}</code>  <i>(tasks: {in_memory_tasks})</i>\n"
+        f"<b>  »  Bot Accounts     :</b> <code>{bots_count}</code>\n"
+        f"<b>  »  Channels Saved   :</b> <code>{total_channels_cnt}</code>\n"
+        f"<b>  🚫 Banned Users     :</b> <code>{len(temp.BANNED_USERS)}</code>\n"
+        "<b></b>\n"
+        f"<b>  »  Uptime            :</b> <code>{uptime}</code>\n"
+        "<b></b>\n"
+        "<b></b>"
     )
     await message.reply_text(text)
 
@@ -362,7 +362,7 @@ async def replace_strings(bot, message):
             configs = await db.get_configs(user_id)
             configs['replacements'] = {}
             await db.update_configs(user_id, configs)
-            return await message.reply_text("✅ All text replacements cleared!")
+            return await message.reply_text("»  All text replacements cleared!")
         return await message.reply_text(usage)
 
     old_text = message.command[1]
@@ -377,4 +377,4 @@ async def replace_strings(bot, message):
 
     configs['replacements'] = replacements
     await db.update_configs(user_id, configs)
-    await message.reply_text(f"✅ Replacement added:\n\n<code>{old_text}</code> ➔ <code>{new_text}</code>")
+    await message.reply_text(f"»  Replacement added:\n\n<code>{old_text}</code> ➔ <code>{new_text}</code>")

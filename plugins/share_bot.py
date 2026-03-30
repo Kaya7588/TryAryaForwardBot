@@ -19,16 +19,16 @@ logger = logging.getLogger(__name__)
 share_clients: dict = {}   # { bot_id_str: Client }
 active_downloads: set = set()
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # Arya Bot Font constants
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 ARYA_VERSION = "V1.0"
 UPDATE_LINK   = "https://t.me/MeJeetX"
 SUPPORT_LINK  = "https://t.me/LightchatX"
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # Helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def format_msg(text: str, user) -> str:
     if not text:
@@ -56,7 +56,7 @@ def _get_base_header(user) -> str:
         f"›› {_sc('Hey!!')}, {u_name}\n\n"
         f"➤ {_sc('Purpose of the bot: This bot makes renaming anime and series files easy and stress-free.')}\n\n"
         f"‣ {_sc('Maintained by')} : {_sc('Yato')}\n"
-        f"──────────────────\n"
+        f"\n"
     )
 
 def _get_welcome_text(user, bot_name, custom_wel=None) -> str:
@@ -75,17 +75,17 @@ def _get_help_text(user) -> str:
         "I am a permanent file store bot. You can access stored files by using "
         "a shareable link given by me from the channel.\n\n"
         "How to Get Files:\n"
-        "➜ Open the channel and tap a link button\n"
-        "➜ I will send the files directly to your DM\n"
-        "➜ If force-subscribe is enabled, join required channels first\n"
-        "➜ If your files are deleted, tap the same button again\n\n"
+        "➲  Open the channel and tap a link button\n"
+        "➲  I will send the files directly to your DM\n"
+        "➲  If force-subscribe is enabled, join required channels first\n"
+        "➲  If your files are deleted, tap the same button again\n\n"
         "Available Commands:\n"
-        "➜ /start — check if I'm alive\n"
-        "➜ Click any episode link button in the channel to receive files\n\n"
+        "➲  /start — check if I'm alive\n"
+        "➲  Click any episode link button in the channel to receive files\n\n"
         "Bot Info:\n"
-        "➜ All deliveries are encrypted and protected\n"
-        "➜ Files may auto-delete after a set time (copyright protection)\n"
-        "➜ Simply click your link button again to re-download"
+        "➲  All deliveries are encrypted and protected\n"
+        "➲  Files may auto-delete after a set time (copyright protection)\n"
+        "➲  Simply click your link button again to re-download"
     )
 
 
@@ -150,9 +150,9 @@ async def check_all_subscriptions(client, user_id: int, fsub_channels: list, bot
 _jr_approved: set = set()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # Module-level handler functions (required for add_handler to work)
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 async def _fsub_record_jr(client, request):
     """
@@ -200,7 +200,7 @@ async def _process_start(client, message):
     link_data = await db.get_share_link(uuid_str)
     if not link_data:
         await message.reply_text(
-            "<b>❌ Link Expired or Invalid</b>\n\n"
+            "<b>‣  Link Expired or Invalid</b>\n\n"
             "This batch link no longer exists. Go back to the channel and click the button again."
         )
         return
@@ -210,7 +210,7 @@ async def _process_start(client, message):
     protect_flag = await db.get_share_protect_global()
 
     if not msg_ids or not source_chat:
-        await message.reply_text("<b>❌ Database Error:</b> Missing file references.")
+        await message.reply_text("<b>‣  Database Error:</b> Missing file references.")
         return
 
     # 2. Force-Subscribe check (per-bot fsub)
@@ -229,15 +229,14 @@ async def _process_start(client, message):
                 label   = f"Jᴏɪɴ Cʜᴀɴɴᴇʟ {channel_num}"  # Never show channel name
                 channel_num += 1
                 if invite:
-                    emoji = "📨" if is_jr else "📢"
+                    emoji = "» " if is_jr else "» "
                     f_buttons.append(InlineKeyboardButton(f"{emoji} {label}", url=invite))
 
             rows = []
             for i in range(0, len(f_buttons), 2):
                 rows.append(f_buttons[i:i+2])
             rows.append([
-                InlineKeyboardButton(
-                    "Tʀʏ Aɢᴀɪɴ",
+                InlineKeyboardButton("Tʀʏ Aɢᴀɪɴ",
                     url=f"https://t.me/{client.me.username}?start={uuid_str}"
                 )
             ])
@@ -253,15 +252,15 @@ async def _process_start(client, message):
                 user_name = message.from_user.first_name or "User"
                 if has_jr:
                     txt = (
-                        f"<b>🔒 Jᴏɪɴ Rᴇϙᴜɪʀᴇᴅ!</b>\n\n"
-                        f"Hᴇʏ {user_name} 👋\n"
+                        f"<b>‣  Jᴏɪɴ Rᴇϙᴜɪʀᴇᴅ!</b>\n\n"
+                        f"Hᴇʏ {user_name} » \n"
                         "Pʟᴇᴀsᴇ sᴇɴᴅ ᴀ <b>ᴊᴏɪɴ ʀᴇϙᴜᴇsᴛ</b> ᴛᴏ ᴀʟʟ ᴄʜᴀɴɴᴇʟs ʙᴇʟᴏᴡ.\n"
                         "<i>After tapping each button and sending the request, click <b>Tʀʏ Aɢᴀɪɴ</b> — you'll get instant access!</i>"
                     )
                 else:
                     txt = (
-                        f"<b>🔒 Jᴏɪɴ Rᴇϙᴜɪʀᴇᴅ!</b>\n\n"
-                        f"Hᴇʏ {user_name} 👋\n"
+                        f"<b>‣  Jᴏɪɴ Rᴇϙᴜɪʀᴇᴅ!</b>\n\n"
+                        f"Hᴇʏ {user_name} » \n"
                         "Pʟᴇᴀsᴇ ᴊᴏɪɴ ᴀʟʟ ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟs ᴛᴏ ᴜsᴇ ᴍᴇ!\n\n"
                         "<i>After joining, click <b>Tʀʏ Aɢᴀɪɴ</b> below.</i>"
                     )
@@ -282,7 +281,7 @@ async def _process_start(client, message):
     active_downloads.add(dl_id)
 
     sts = await message.reply_text(
-        "<i>⏳ Fᴇᴛᴄʜɪɴɢ ʏᴏᴜʀ ꜰɪʟᴇs sᴇᴄᴜʀᴇʟʏ, ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...</i>",
+        "<i>»  Fᴇᴛᴄʜɪɴɢ ʏᴏᴜʀ ꜰɪʟᴇs sᴇᴄᴜʀᴇʟʏ, ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ...</i>",
         reply_markup=InlineKeyboardMarkup([[
             InlineKeyboardButton("Cᴀɴᴄᴇʟ", callback_data=f"cancel_dl_{uuid_str}")
         ]])
@@ -323,7 +322,7 @@ async def _process_start(client, message):
         total = len(sent_ids)
         if total == 0:
             await message.reply_text(
-                "<b>❌ Dᴇʟɪᴠᴇʀʏ Fᴀɪʟᴇᴅ</b>\n\n"
+                "<b>‣  Dᴇʟɪᴠᴇʀʏ Fᴀɪʟᴇᴅ</b>\n\n"
                 "Could not copy any files. "
                 "Ensure the Share Bot is an <b>admin</b> in the Database Channel."
             )
@@ -342,7 +341,7 @@ async def _process_start(client, message):
                 txt = format_msg(del_tpl, message.from_user).replace("{time}", del_str)
             else:
                 txt = (
-                    f"<i>⚠️ Iᴍᴘᴏʀᴛᴀɴᴛ: {total} file(s) delivered! Due to copyright, all messages "
+                    f"<i>‣  Iᴍᴘᴏʀᴛᴀɴᴛ: {total} file(s) delivered! Due to copyright, all messages "
                     f"will auto-delete after {del_str}. "
                     f"To re-access, simply click the same link button again.{fail_note}</i>"
                 )
@@ -354,7 +353,7 @@ async def _process_start(client, message):
             suc_tpl = (await db.get_share_bot_text(bot_id, "success_msg") if bot_id else "") or \
                       await db.get_share_text("success_msg", "")
             txt = (format_msg(suc_tpl, message.from_user) if suc_tpl
-                   else f"<b>✅ {total} ꜰɪʟᴇ(s) ᴅᴇʟɪᴠᴇʀᴇᴅ!</b>{fail_note}")
+                   else f"<b>»  {total} ꜰɪʟᴇ(s) ᴅᴇʟɪᴠᴇʀᴇᴅ!</b>{fail_note}")
             await message.reply_text(txt)
 
     except Exception as e:
@@ -364,7 +363,7 @@ async def _process_start(client, message):
         except Exception:
             pass
         await message.reply_text(
-            f"<b>❌ Dᴇʟɪᴠᴇʀʏ Eʀʀᴏʀ:</b> <code>{e}</code>\n\n"
+            f"<b>‣  Dᴇʟɪᴠᴇʀʏ Eʀʀᴏʀ:</b> <code>{e}</code>\n\n"
             "<i>The Share Bot must be an admin in the Database Channel to deliver files.</i>"
         )
 
@@ -388,7 +387,7 @@ async def _send_welcome(client, message, bot_id: str = None):
             InlineKeyboardButton(_sc("Help"), callback_data="sbd#help"),
             InlineKeyboardButton(_sc("About"), callback_data="sbd#about"),
         ],
-        [InlineKeyboardButton("🔔 " + _sc("Update Channel"), url=UPDATE_LINK)]
+        [InlineKeyboardButton("»  " + _sc("Update Channel"), url=UPDATE_LINK)]
     ]
     markup = InlineKeyboardMarkup(buttons)
 
@@ -405,8 +404,8 @@ async def _send_help(client, message, bot_id: str = None):
     """Send the Help menu for /start help."""
     txt = _get_help_text(message.from_user)
     buttons = [
-        [InlineKeyboardButton("◀️ " + _sc("Back"), callback_data="sbd#back")],
-        [InlineKeyboardButton("🔔 " + _sc("Update Channel"), url=UPDATE_LINK)]
+        [InlineKeyboardButton("«  " + _sc("Back"), callback_data="sbd#back")],
+        [InlineKeyboardButton("»  " + _sc("Update Channel"), url=UPDATE_LINK)]
     ]
     try:
         await message.reply_text(txt, reply_markup=InlineKeyboardMarkup(buttons))
@@ -446,7 +445,7 @@ async def _send_about(client, query_or_msg, bot_id: str = None, edit: bool = Tru
         )
         txt = _get_base_header(user) + _sc(about_body)
 
-    buttons = [[InlineKeyboardButton("◀️ " + _sc("Back"), callback_data="sbd#back")]]
+    buttons = [[InlineKeyboardButton("«  " + _sc("Back"), callback_data="sbd#back")]]
     markup  = InlineKeyboardMarkup(buttons)
 
     is_photo_msg = bool(getattr(msg, 'photo', None))
@@ -469,8 +468,8 @@ async def _process_delivery_button(client, query):
         await query.answer()
         txt = _get_help_text(query.from_user)
         buttons = [
-            [InlineKeyboardButton("◀️ " + _sc("Back"), callback_data="sbd#back")],
-            [InlineKeyboardButton("🔔 " + _sc("Update Channel"), url=UPDATE_LINK)]
+            [InlineKeyboardButton("«  " + _sc("Back"), callback_data="sbd#back")],
+            [InlineKeyboardButton("»  " + _sc("Update Channel"), url=UPDATE_LINK)]
         ]
         markup = InlineKeyboardMarkup(buttons)
         try:
@@ -493,7 +492,7 @@ async def _process_delivery_button(client, query):
                 InlineKeyboardButton(_sc("Help"), callback_data="sbd#help"),
                 InlineKeyboardButton(_sc("About"), callback_data="sbd#about"),
             ],
-            [InlineKeyboardButton("🔔 " + _sc("Update Channel"), url=UPDATE_LINK)]
+            [InlineKeyboardButton("»  " + _sc("Update Channel"), url=UPDATE_LINK)]
         ]
         markup = InlineKeyboardMarkup(buttons)
         try:
@@ -520,9 +519,9 @@ async def _process_delivery_cancel(client, query):
         await query.answer("Already finished or cancelled.", show_alert=True)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 # Registration & Startup
-# ─────────────────────────────────────────────────────────────────────────────
+# 
 
 def register_share_handlers(app: Client):
     """Register all handlers on a started Client instance."""
