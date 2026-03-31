@@ -632,6 +632,12 @@ async def _scan_total_size(client, from_chat, start_id, end_id):
 # Core runner — Chunked, Memory-safe
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _start_task(jid, uid, bot):
+    ev = asyncio.Event()
+    ev.set()
+    _mg_paused[jid] = ev
+    _mg_tasks[jid] = asyncio.create_task(_run_job(jid, uid, bot))
+
 async def _run_job(jid, uid, bot):
     job = await _db_get(jid)
     if not job: return
