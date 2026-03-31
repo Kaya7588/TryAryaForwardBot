@@ -834,6 +834,7 @@ async def _run_job(jid, uid, bot):
             chunk_files = []
             chunk_bytes = 0
             status_msg  = None
+            chunk_dl_start = time.time()  # local timer per chunk
 
             try:
                 status_msg = await bot.send_message(uid,
@@ -919,9 +920,9 @@ async def _run_job(jid, uid, bot):
                 logger.warning(f"[MG {jid}] Chunk {chunk_num} had no downloadable files, skipping.")
                 continue
 
-            # End download phase — record dl_time
+            # End download phase — record dl_time for this chunk
             _dl_end = time.time()
-            _dl_time = _dl_end - (job.get("phase_start_ts") or _dl_end)
+            _dl_time = _dl_end - chunk_dl_start
 
             # Partial merge of this chunk
             await _db_up(jid, status="merging", dl_time=_dl_time, phase_start_ts=time.time())
@@ -961,12 +962,14 @@ async def _run_job(jid, uid, bot):
 
             part_files.append(part_path)
 
-            # ✅ Delete chunk originals immediately to free disk
+            # ✅ Delete chunk originals immediately to free disk/RAM
             for f in chunk_files:
                 try: os.remove(f)
                 except: pass
-            try: os.rmdir(chunk_dir)
-            except: pass
+            try:
+                os.rmdir(chunk_dir)
+            except OSError:
+                shutil.rmtree(chunk_dir, ignore_errors=True)
 
             await _db_up(jid, status="downloading")
             try:
@@ -999,17 +1002,27 @@ async def _run_job(jid, uid, bot):
 
         part_files_sorted = sorted(part_files, key=lambda p: os.path.basename(p))
         final_dur = cumulative_secs
+
+        # Dedicated progress message for the final combine
+        try:
+            final_status_msg = await bot.send_message(uid,
+                f"<b>🔀 Final combine starting…</b>\n"
+                f"📁 {len(part_files_sorted)} parts → {out_name}{out_ext}")
+        except:
+            final_status_msg = None
+
         last_edit2 = [time.time()]
         async def final_prog(cur_secs):
             now = time.time()
             if now - last_edit2[0] > 5:
                 pct = min(100, int((cur_secs / max(final_dur, 0.1)) * 100))
                 try:
-                    await status_msg.edit_text(
-                        f"<b>🔀 Final combine: {len(part_files)} parts → {out_name}{out_ext}</b>\n"
-                        f"<code>{_bar(pct, 100)}</code>\n"
-                        f"⏳ Progress: {pct}%"
-                    )
+                    if final_status_msg:
+                        await final_status_msg.edit_text(
+                            f"<b>🔀 Final combine: {len(part_files_sorted)} parts → {out_name}{out_ext}</b>\n"
+                            f"<code>{_bar(pct, 100)}</code>\n"
+                            f"⏳ Progress: {pct}% • {_tm(int(cur_secs))}/{_tm(int(max(final_dur,0.1)))}"
+                        )
                 except: pass
                 last_edit2[0] = now
 
