@@ -239,6 +239,13 @@ class Database:
     async def get_share_link(self, uuid_str: str):
         return await self.share_links.find_one({'_id': uuid_str})
         
+    async def get_sys_mode(self) -> str:
+        doc = await self.opt.find_one({"_id": "SYS_MODE"})
+        return doc.get("mode", "vps") if doc else "vps"
+        
+    async def set_sys_mode(self, mode: str):
+        await self.opt.update_one({"_id": "SYS_MODE"}, {"$set": {"mode": mode}}, upsert=True)
+
     async def get_global_stats(self):
         import time
         doc = await self.stats.find_one({'_id': 'bot_stats'})

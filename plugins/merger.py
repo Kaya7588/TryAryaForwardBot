@@ -631,13 +631,24 @@ async def _scan_total_size(client, from_chat, start_id, end_id):
 # ══════════════════════════════════════════════════════════════════════════════
 # Core runner — Chunked, Memory-safe
 # ══════════════════════════════════════════════════════════════════════════════
-CHUNK_SIZE   = 5          # Reduced to 10 to keep RAM footprint low
-MAX_TOTAL_GB = 15.0        # Hard limit on total estimated size across all files
-MAX_CHUNK_GB = 2.0         # Abort a single chunk if it somehow exceeds this
 
 async def _run_job(jid, uid, bot):
     job = await _db_get(jid)
     if not job: return
+
+    sys_mode = await db.get_sys_mode()
+    if sys_mode == "pc":
+        # Ultra PC Mode: High power, high resources
+        CHUNK_SIZE = 25
+        MAX_TOTAL_GB = 150.0  
+        MAX_CHUNK_GB = 15.0
+        MAX_FILES = 999
+    else:
+        # Standard VPS Mode: Low RAM usage, strict limits
+        CHUNK_SIZE = 5
+        MAX_TOTAL_GB = 6.0
+        MAX_CHUNK_GB = 2.0
+        MAX_FILES = 150
 
     ev = _mg_paused.get(jid)
     if not ev:
@@ -692,9 +703,6 @@ async def _run_job(jid, uid, bot):
         except: scan_msg = None
 
         est_size, media_count = await _scan_total_size(client, from_chat, start_id, end_id)
-
-        MAX_TOTAL_GB = 5.0
-        MAX_FILES = 150
 
         if est_size > MAX_TOTAL_GB * 1024**3 or media_count > MAX_FILES:
             msg = (f"<b>❌ Pre-scan blocked your request:</b>\n"
