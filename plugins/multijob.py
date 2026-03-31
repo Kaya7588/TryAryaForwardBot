@@ -474,22 +474,18 @@ async def _run_multijob(job_id: str, user_id: int, bot=None):
             valid = [m for m in msgs if m and not m.empty]
             valid.sort(key=lambda m: m.id)
             
-            # Cross-chat filter: only needed for private groups (negative int IDs)
-            # where Pyrogram may return messages from a different peer due to global ID overlaps.
-            # For DM sources (positive int) or "me", skip this — get_messages already fetches
-            # from the exact peer, and m.chat.id comparisons fail for DM messages.
+            # Cross-chat filter: only apply for supergroups/channels (negative int IDs).
+            # For positive int IDs (DMs/bots), string usernames (bot DMs, @channels), or "me":
+            # Pyrogram's get_messages already fetches from the exact peer — no further
+            # verification is needed, and attempting it would break Bot DM sources because
+            # m.chat.id is a numeric ID that won't match a @username string.
             filtered = []
             for m in valid:
                 if isinstance(from_chat, int) and from_chat < 0:
-                    # Group/channel: verify the message belongs to the correct chat
+                    # Private group/private channel: verify the message's chat matches
                     if m.chat is None: continue
                     if m.chat.id != from_chat: continue
-                elif isinstance(from_chat, str) and from_chat != "me":
-                    # Username: verify
-                    if m.chat is None: continue
-                    src = from_chat.replace("@", "").lower()
-                    if str(m.chat.id) != src and (not m.chat.username or m.chat.username.lower() != src): continue
-                # For positive int IDs (DMs/bots) and "me": no filter needed
+                # For string usernames, positive IDs (bots, DMs), and "me": accept all
                 filtered.append(m)
             valid = filtered
 
