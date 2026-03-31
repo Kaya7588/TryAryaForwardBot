@@ -530,6 +530,25 @@ async def _process_delivery_cancel(client, query):
         await query.answer("Already finished or cancelled.", show_alert=True)
 
 
+async def _process_menu_image(client, message):
+    from config import Config
+    if getattr(message.from_user, 'id', 0) not in Config.BOT_OWNER_ID:
+        return
+        
+    bot_id = str(client.me.id) if client.me else None
+    if not bot_id: return
+    
+    if message.reply_to_message and message.reply_to_message.photo:
+        photo = message.reply_to_message.photo
+        about = await db.get_share_bot_about(bot_id) if bot_id else {}
+        about['welcome_image_id'] = photo.file_id
+        await db.set_share_bot_about(bot_id, about)
+        await message.reply_text("<b>✅ Menu Image Updated!</b>\n\nThis image will now be used across the Welcome, Help, and About menus for this specific delivery bot.")
+    else:
+        await message.reply_text("<b>‣ To set the Menu Image:</b>\nPlease reply to an image with <code>/menuimage</code>.")
+
+
+
 # 
 # Registration & Startup
 # 
@@ -549,6 +568,10 @@ def register_share_handlers(app: Client):
     app.add_handler(CallbackQueryHandler(
         _process_delivery_cancel,
         filters.regex(r'^cancel_dl_')
+    ))
+    app.add_handler(MessageHandler(
+        _process_menu_image,
+        filters.private & filters.command(["menuimage", "setmenuimage", "setimage"])
     ))
     logger.info(f"Handlers registered on {app.name}")
 

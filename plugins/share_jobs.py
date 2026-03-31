@@ -145,35 +145,35 @@ async def _create_share_flow(bot, user_id):
         new_share_job[user_id]['is_topic'] = is_topic
 
         #  STEP 6.5: SELECT ACCOUNT 
-        accounts = await db.get_bots(user_id)
-        if not accounts:
-            return await bot.send_message(user_id, "<b>❌ No accounts found. Add one in /settings → Accounts first.</b>")
-            
         if is_topic:
+            accounts = await db.get_bots(user_id)
+            if not accounts:
+                return await bot.send_message(user_id, "<b>❌ No accounts found. Add one in /settings → Accounts first.</b>")
+                
             userbots = [a for a in accounts if not a.get("is_bot", True)]
             if not userbots:
                 return await bot.send_message(user_id, "<b>❌ You selected 'Group Topic', but you have no Userbot added!</b>\nBots cannot scan Group Topics. Please go to /settings → Accounts and add a Userbot first.")
             valid_accounts = userbots
+                
+            acc_kb = [[KeyboardButton(f"»  Userbot: {a.get('name', '?')}")] for a in valid_accounts]
+            acc_kb.append([KeyboardButton("/cancel")])
+            
+            msg_acc = await _ask(bot, user_id,
+                "<b>❪ STEP 6.5: SCANNING ACCOUNT ❫</b>\n\nChoose the Userbot to use for reading files from the Group Topic:\n"
+                "<i>(⚠️ NOTE: Group Topics MUST be scanned by a Userbot.)</i>",
+                reply_markup=ReplyKeyboardMarkup(acc_kb, resize_keyboard=True, one_time_keyboard=True)
+            )
+            if not msg_acc.text or "/cancel" in msg_acc.text:
+                return await bot.send_message(user_id, "Cancelled.", reply_markup=ReplyKeyboardRemove())
+                
+            acc_name = msg_acc.text.split(": ", 1)[-1].strip()
+            sel_acc = next((a for a in valid_accounts if a.get("name") == acc_name), None)
+            if not sel_acc:
+                return await bot.send_message(user_id, "<b>‣ Account not found.</b>", reply_markup=ReplyKeyboardRemove())
+                
+            new_share_job[user_id]['account_id'] = sel_acc['id']
         else:
-            valid_accounts = accounts
-            
-        acc_kb = [[KeyboardButton(f"»  {'Bot' if a.get('is_bot', True) else 'Userbot'}: {a.get('name', '?')}")] for a in valid_accounts]
-        acc_kb.append([KeyboardButton("/cancel")])
-        
-        msg_acc = await _ask(bot, user_id,
-            "<b>❪ STEP 6.5: SCANNING ACCOUNT ❫</b>\n\nChoose the account to use for reading files from the source channel/topic:\n"
-            "<i>(⚠️ NOTE: Group Topics MUST be scanned by a Userbot.)</i>",
-            reply_markup=ReplyKeyboardMarkup(acc_kb, resize_keyboard=True, one_time_keyboard=True)
-        )
-        if not msg_acc.text or "/cancel" in msg_acc.text:
-            return await bot.send_message(user_id, "Cancelled.", reply_markup=ReplyKeyboardRemove())
-            
-        acc_name = msg_acc.text.split(": ", 1)[-1].strip()
-        sel_acc = next((a for a in valid_accounts if a.get("name") == acc_name), None)
-        if not sel_acc:
-            return await bot.send_message(user_id, "<b>‣ Account not found.</b>", reply_markup=ReplyKeyboardRemove())
-            
-        new_share_job[user_id]['account_id'] = sel_acc['id']
+            new_share_job[user_id]['account_id'] = None  # Default to Main Bot for normal channels.
 
         if is_topic:
             msg_topic = await _ask(bot, user_id, 
@@ -307,20 +307,23 @@ async def _build_share_links(bot, user_id, sj, info_msg):
 
         bot_usr = poster.me.username
 
-        await safe_edit("<i>»  Starting scanning client...</i>")
-        try:
-            from plugins.test import _CLIENT, start_clone_bot
-            acc = await db.get_bot(user_id, sj.get("account_id"))
-            if not acc:
-                return await safe_edit("‣  Scanning Account not found.")
-            scanner_client = await start_clone_bot(_CLIENT.client(acc))
-            # Pre-fetch cache dialogs
+        if sj.get("account_id"):
+            await safe_edit("<i>»  Starting scanning client...</i>")
             try:
-                await scanner_client.get_chat(sj['source'])
-            except:
-                pass
-        except Exception as e:
-            return await safe_edit(f"‣  Failed to start scanning account: {e}")
+                from plugins.test import CLIENT, start_clone_bot
+                acc = await db.get_bot(user_id, sj.get("account_id"))
+                if not acc:
+                    return await safe_edit("‣  Scanning Account not found.")
+                scanner_client = await start_clone_bot(CLIENT().client(acc))
+                # Pre-fetch cache dialogs
+                try:
+                    await scanner_client.get_chat(sj['source'])
+                except:
+                    pass
+            except Exception as e:
+                return await safe_edit(f"‣  Failed to start scanning account: {e}")
+        else:
+            scanner_client = bot
 
         await safe_edit("<i>»  Scanning database channel and generating links...</i>")
 

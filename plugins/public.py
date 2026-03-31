@@ -15,7 +15,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQ
 @Client.on_message(filters.private & filters.command("sysmode"))
 async def sysmode_cmd(bot, message):
     from config import Config
-    if message.from_user.id != Config.OWNER_ID:
+    if message.from_user.id not in Config.BOT_OWNER_ID:
         return await message.reply("Only the owner can use this command.")
         
     current = await db.get_sys_mode()

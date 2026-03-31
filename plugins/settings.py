@@ -547,7 +547,7 @@ async def settings_query(bot, query):
           # (its own DM/saved messages), then capture ITS OWN file_id from that message.
           # ——————————————————————————————————————————————————————————————————————
           from plugins.share_bot import share_clients
-          sb_client = share_clients.get(int(b_id)) if b_id.isdigit() else None
+          sb_client = share_clients.get(str(b_id))
 
           final_file_id = photo.file_id  # default: Arya bot's id (may fail in delivery bot)
           if sb_client:
@@ -658,7 +658,7 @@ async def settings_query(bot, query):
               )
               
           from plugins.share_bot import share_clients
-          sb_client = share_clients.get(int(b_id)) if b_id.isdigit() else None
+          sb_client = share_clients.get(str(b_id))
           if not sb_client:
               await ask.delete()
               return await bot.send_message(
