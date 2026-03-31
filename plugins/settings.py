@@ -1582,6 +1582,7 @@ async def main_buttons(user_id=None):
   else:
       #  FORWARD MODE: Full original menu 
       buttons = [[
+           InlineKeyboardButton('↔️ ꜰᴏʀᴡᴀʀᴅ ᴍᴏᴅᴇ »   ⟶  ᴛᴀᴘ ᴛᴏ ꜱᴡɪᴛᴄʜ',
                         callback_data='settings#toggle_mode')
            ],[
            InlineKeyboardButton('👥 ᴀᴄᴄᴏᴜɴᴛꜱ',
