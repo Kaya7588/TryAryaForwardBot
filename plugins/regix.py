@@ -842,11 +842,11 @@ def smart_clean_caption(caption: str) -> str:
 def remove_all_links(text: str) -> str:
     if not text:
         return ""
-    # Strip HTML anchor tags entirely, or maybe keep their inner text?
-    # Keeping inner text: replacing <a href="...">Text</a> with Text
-    text = re.sub(r'(?i)<a\s+href="[^"]*".*?>(.*?)</a>', r'\1', text)
+    # Strip HTML anchor tags entirely including inner text (strict link removal)
+    text = re.sub(r'(?i)<a\s+href=[^>]+>.*?</a>', '', text)
     # Remove raw URLs
     text = re.sub(r'(?i)\bhttps?://[^\s]+', '', text)
+    text = re.sub(r'(?i)\bwww\.[^\s]+', '', text)
     text = re.sub(r'(?i)\bt\.me/[^\s]+', '', text)
     # Remove mentions
     text = re.sub(r'(?i)@\w+', '', text)
@@ -862,18 +862,16 @@ def custom_caption(msg, caption, apply_smart_clean=False, remove_links_flag=Fals
   file_name = getattr(media, 'file_name', '')
   file_size = getattr(media, 'file_size', 0)
   
+  if apply_smart_clean == 2:
+      # Wipe All Captions strictly. Block it completely regardless of template.
+      return ""
+      
   fcaption = getattr(msg, 'caption', '')
   if fcaption: fcaption = getattr(fcaption, 'html', str(fcaption))
   
-  if apply_smart_clean == 2:
-      # Wipe All Captions. Block it completely.
-      fcaption = ""
-  elif apply_smart_clean is True:
+  if apply_smart_clean is True:
       # Smart Clean: Remove target patterns
       fcaption = smart_clean_caption(fcaption)
-  elif apply_smart_clean is False:
-      # Keep Original
-      pass
 
   if remove_links_flag and fcaption:
       fcaption = remove_all_links(fcaption)
@@ -887,10 +885,7 @@ def custom_caption(msg, caption, apply_smart_clean=False, remove_links_flag=Fals
           return caption  # Fallback if bad format
           
   # No template provided
-  if apply_smart_clean == 2:
-      # return "" so Pyrogram actually overrides the original caption with nothing
-      return ""
-  elif apply_smart_clean is True:
+  if apply_smart_clean is True:
       # Smart clean modified the caption, return the new cleaned text
       return fcaption if fcaption else ""
   else:

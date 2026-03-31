@@ -1084,8 +1084,9 @@ async def _run_job(jid, uid, bot):
         for dest in all_dests:
             for att in range(3):
                 try:
+                    sent_msg = None
                     if mtype == "video":
-                        await client.send_video(chat_id=dest, video=out_path,
+                        sent_msg = await client.send_video(chat_id=dest, video=out_path,
                             caption=caption, file_name=f"{out_name}{out_ext}",
                             thumb=thumb, supports_streaming=True, progress=_up_prog)
                     else:
@@ -1093,7 +1094,10 @@ async def _run_job(jid, uid, bot):
                               "file_name":f"{out_name}{out_ext}","thumb":thumb, "progress":_up_prog}
                         if metadata.get("title"): kw["title"] = metadata["title"]
                         if metadata.get("artist"): kw["performer"] = metadata["artist"]
-                        await client.send_audio(**kw)
+                        sent_msg = await client.send_audio(**kw)
+                        
+                    if dest == uid and sent_msg:
+                        await _db_up(jid, final_msg_id=sent_msg.id)
                     break
                 except FloodWait as fw: await asyncio.sleep(fw.value+2)
                 except Exception as e:
@@ -1360,8 +1364,78 @@ async def mg_cb(bot, query):
         # Only show Edit YT button if the job is done and has a YouTube video ID stored
         if job.get("status") == "done" and job.get("yt_video_id"):
             info_btns.append([InlineKeyboardButton("✏️ Edit YT Title/Desc", callback_data=f"mg#yt_edit#{param}")])
+        if job.get("status") == "done" and job.get("merge_type") == "video":
+            info_btns.append([InlineKeyboardButton("✏️ Replace Audio", callback_data=f"mg#repaud#{param}")])
         info_btns.append([InlineKeyboardButton("↩ Bᴀᴄᴋ", callback_data=f"mg#{mtype}_list")])
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(info_btns))
+
+    # ── Replace Audio of Merged Video ─────────────────────────────────────
+    elif action == "repaud":
+        job = await _db_get(param)
+        if not job or job.get("status") != "done": return await query.answer("Job not finished or not found!", show_alert=True)
+        await query.message.delete()
+        r = await _mg_ask(bot, uid,
+            "<b>✏️ Replace Audio</b>\n\n"
+            "Please send the <b>Telegram Link</b> of the new Audio message.\n"
+            "(Or forward the audio message here.)\n\n"
+            "<i>Note: If this job was processed before the update, you may be asked to provide the video link too.</i>\n\n"
+            "Send /cancel to abort.",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/cancel")]], resize_keyboard=True, one_time_keyboard=True))
+        
+        if "/cancel" in (r.text or "").lower():
+            return await bot.send_message(uid, "Cancelled.", reply_markup=ReplyKeyboardRemove())
+        
+        audio_msg = None
+        if r.audio or r.voice or r.document:
+            audio_msg = r
+        elif r.text and "t.me/" in r.text:
+            try:
+                parts = r.text.strip().split("?")[0].split("/")
+                if "c" in parts:
+                    cidx = parts.index("c")
+                    chat_id = int("-100" + parts[cidx+1])
+                    msg_id = int(parts[cidx+2])
+                else:
+                    chat_id = parts[-2]
+                    msg_id = int(parts[-1])
+                audio_msg = await bot.get_messages(chat_id, msg_id)
+            except Exception as e:
+                return await bot.send_message(uid, f"Failed to fetch audio link: {e}", reply_markup=ReplyKeyboardRemove())
+                
+        if not getattr(audio_msg, "audio", None) and not getattr(audio_msg, "voice", None) and not getattr(audio_msg, "document", None):
+            return await bot.send_message(uid, "Valid audio not found in that message.", reply_markup=ReplyKeyboardRemove())
+            
+        video_msg = None
+        if job.get("final_msg_id"):
+            try: video_msg = await bot.get_messages(uid, job["final_msg_id"])
+            except: pass
+            
+        if not getattr(video_msg, "video", None) and not getattr(video_msg, "document", None):
+            r2 = await _mg_ask(bot, uid,
+                "⚠️ Could not find the original video. Please send the <b>Telegram Link</b> of the Video message, or forward it here.",
+                reply_markup=ReplyKeyboardMarkup([[KeyboardButton("/cancel")]], resize_keyboard=True, one_time_keyboard=True))
+            if "/cancel" in (r2.text or "").lower():
+                return await bot.send_message(uid, "Cancelled.", reply_markup=ReplyKeyboardRemove())
+            if r2.video or r2.document: video_msg = r2
+            elif r2.text and "t.me/" in r2.text:
+                try:
+                    parts = r2.text.strip().split("?")[0].split("/")
+                    if "c" in parts:
+                        cidx = parts.index("c")
+                        chat_id = int("-100" + parts[cidx+1])
+                        msg_id = int(parts[cidx+2])
+                    else:
+                        chat_id = parts[-2]
+                        msg_id = int(parts[-1])
+                    video_msg = await bot.get_messages(chat_id, msg_id)
+                except: pass
+                
+        if not getattr(video_msg, "video", None) and not getattr(video_msg, "document", None):
+            return await bot.send_message(uid, "Valid video not found.", reply_markup=ReplyKeyboardRemove())
+            
+        await bot.send_message(uid, "<b>🔄 Audio Replacement Started</b>\nDownloading files and processing in background...", reply_markup=ReplyKeyboardRemove())
+        
+        asyncio.create_task(_replace_audio_worker(bot, uid, param, video_msg, audio_msg))
 
     # ── Edit YouTube Video Title/Description ──────────────────────────────
     elif action == "yt_edit":
@@ -1910,3 +1984,78 @@ async def _create_flow(bot, uid, mtype="audio"):
     except Exception as e:
         logger.error(f"[MG create] {e}")
         await bot.send_message(uid, f"<b>❌ Error:</b> <code>{e}</code>", reply_markup=ReplyKeyboardRemove())
+
+
+async def _replace_audio_worker(bot, uid, job_id, video_msg, audio_msg):
+    job = await _db_get(job_id)
+    if not job: return
+    
+    wdir = os.path.abspath(f"merge_tmp/repaud_{uuid.uuid4()}")
+    os.makedirs(wdir, exist_ok=True)
+    
+    status_msg = await bot.send_message(uid, f"<b>🔄 Replacing Audio...</b>\nJob: <code>{job_id[-6:]}</code>")
+    try:
+        vid_path = os.path.join(wdir, "original_video.mp4")
+        aud_path = os.path.join(wdir, "new_audio.mp3")
+        out_path = os.path.join(wdir, "final_video.mp4")
+        
+        await status_msg.edit_text("<b>🔄 Downloading Video...</b>")
+        await video_msg.download(file_name=vid_path)
+        
+        await status_msg.edit_text("<b>🔄 Downloading Audio...</b>")
+        await audio_msg.download(file_name=aud_path)
+        
+        await status_msg.edit_text("<b>🔄 Merging Audio and Video (FFmpeg)...</b>")
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", vid_path,
+            "-i", aud_path,
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-map", "0:v:0",
+            "-map", "1:a:0?",
+            "-shortest",
+            out_path
+        ]
+        
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode != 0:
+            err = stderr.decode('utf-8', errors='replace')
+            return await bot.send_message(uid, f"<b>❌ Error replacing audio:</b>\n<code>{err[:1000]}</code>")
+            
+        await status_msg.edit_text("<b>⬆️ Uploading updated Video...</b>")
+        
+        dest_chats = job.get("dest_chats", [uid])
+        all_dests = [uid] + [d for d in dest_chats if d != uid]
+        
+        caption = getattr(video_msg, "caption", f"<b>🔀 Updated Audio: {job.get('output_name', 'Video')}</b>")
+        if caption:
+            caption = getattr(caption, "html", str(caption))
+            
+        for dest in all_dests:
+            for att in range(3):
+                try:
+                    await bot.send_video(
+                        chat_id=dest, 
+                        video=out_path, 
+                        caption=caption,
+                        supports_streaming=True
+                    )
+                    break
+                except FloodWait as fw: await asyncio.sleep(fw.value+2)
+                except Exception as e:
+                    if att < 2: await asyncio.sleep(5)
+                    else: logger.warning(f"Replace audio upload failed: {e}")
+                    
+        await status_msg.edit_text("<b>✅ Audio Replacement Complete!</b>\nVideo uploaded to destinations.")
+    except Exception as e:
+        await bot.send_message(uid, f"<b>❌ Error:</b> <code>{e}</code>")
+    finally:
+        try: shutil.rmtree(wdir)
+        except: pass
