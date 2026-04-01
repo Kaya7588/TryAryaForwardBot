@@ -587,8 +587,21 @@ async def _run_job(job_id: str, user_id: int):
 
             new_msgs: list = []
 
+            # Determine if this source supports get_chat_history.
+            # Only "me" (Saved Messages) and negative-ID chats (channels/supergroups)
+            # work correctly with get_chat_history on a userbot.
+            # @username and positive int IDs (Bot DMs) MUST use get_messages —
+            # using get_chat_history on them would fetch from the wrong peer entirely.
+            def _supports_history(fc):
+                if isinstance(fc, str) and fc.lower() in ("me", "saved"):
+                    return True
+                if isinstance(fc, int) and fc < 0:
+                    return True
+                return False
+
             try:
-                if not is_bot:
+                if not is_bot and _supports_history(from_chat):
+                    # Userbot + group/channel/saved messages → use fast history scroll
                     collected = []
                     async for msg in client.get_chat_history(from_chat, limit=50):
                         if msg.id <= last_seen:

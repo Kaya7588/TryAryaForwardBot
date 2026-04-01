@@ -786,8 +786,9 @@ def _build_channel_progress_text(forwarded: int, total: int, status: str = "forw
 async def channel_progress_start(client, dest_chat: int, total: int, thread_id: int = None) -> None:
     """Send the initial progress message to the destination channel and pin it."""
     try:
+        from pyrogram.enums import ParseMode
         text = _build_channel_progress_text(0, total, "forwarding")
-        kw = {"text": text, "parse_mode": "html"}
+        kw = {"text": text, "parse_mode": ParseMode.HTML}
         if thread_id:
             kw["message_thread_id"] = thread_id
         msg = await client.send_message(dest_chat, **kw)
