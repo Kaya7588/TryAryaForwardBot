@@ -282,8 +282,10 @@ async def _safe_resolve_peer(client, chat_id):
                     # Warm up dialogs cache with a strict timeout to prevent hanging
                     try:
                         async def _drain_dialogs():
-                            async for _ in client.get_dialogs(limit=50): pass
-                        await asyncio.wait_for(_drain_dialogs(), timeout=30)
+                            async for d in client.get_dialogs():
+                                if getattr(d.chat, 'id', None) == chat_id:
+                                    break
+                        await asyncio.wait_for(_drain_dialogs(), timeout=45)
                     except asyncio.TimeoutError:
                         logger.warning(f"[MG] get_dialogs timed out for {chat_id}, proceeding anyway")
                 await asyncio.wait_for(client.get_chat(chat_id), timeout=20)

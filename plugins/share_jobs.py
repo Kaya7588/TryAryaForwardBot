@@ -948,25 +948,24 @@ async def _build_share_links(bot, user_id, sj, info_msg):
                 )
 
                 dm_cap = (
-                    f"<b>Report File</b>\n\n<blockquote expandable>{dm_header}{en_body}</blockquote>\n\n<blockquote expandable>{hi_body}</blockquote>"
+                    f"<blockquote expandable>{dm_header}{en_body}</blockquote>\n\n<blockquote expandable>{hi_body}</blockquote>"
                 )
                 ch_cap = (
-                    f"<b>Report File</b>\n\n<blockquote expandable>{ch_header}{en_body}</blockquote>\n\n<blockquote expandable>{hi_body}</blockquote>"
+                    f"<blockquote expandable>{ch_header}{en_body}</blockquote>\n\n<blockquote expandable>{hi_body}</blockquote>"
                 )
 
             else:
-                dm_ongoing = (
-                    f"›› {_sc('Hey')} <a href='tg://user?id={user_id}'>{u_name}</a>\n\n"
-                    + _sc("I have posted all the files currently available. "
-                           "As new episodes arrive, I will post them. Enjoy!")
-                )
-                ch_ongoing = (
-                    f"›› {_sc('Hey Strangers')}\n\n"
-                    + _sc("All currently available files have been posted here. "
+                dm_header  = f"›› {_sc('Hey')} <a href='tg://user?id={user_id}'>{u_name}</a>\n\n"
+                ch_header  = f"›› {_sc('Hey Strangers')}\n\n"
+                
+                en_body = _sc("All currently available files have been posted here. "
                            "New episodes will be added as they arrive. Enjoy and stay tuned!")
-                )
-                dm_cap = f"<b>Status</b>\n\n<blockquote expandable>{dm_ongoing}</blockquote>"
-                ch_cap = f"<b>Status</b>\n\n<blockquote expandable>{ch_ongoing}</blockquote>"
+                           
+                hi_body = ("वर्तमान में उपलब्ध सभी फ़ाइलें यहाँ पोस्ट कर दी गई हैं। "
+                           "जैसे ही नए एपिसोड आएंगे, उन्हें जोड़ दिया जाएगा। आनंद लें और जुड़े रहें!")
+
+                dm_cap = f"<blockquote expandable>{dm_header}{en_body}</blockquote>\n\n<blockquote expandable>{hi_body}</blockquote>"
+                ch_cap = f"<blockquote expandable>{ch_header}{en_body}</blockquote>\n\n<blockquote expandable>{hi_body}</blockquote>"
 
             # Send to admin DM — independent of channel
             try:
