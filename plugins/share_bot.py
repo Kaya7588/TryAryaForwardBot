@@ -641,12 +641,14 @@ async def start_share_bot():
 
     for index, b in enumerate(bots):
         try:
+            import os
+            os.makedirs("sessions", exist_ok=True)
             sc = Client(
                 name=f"share_bot_{b['id']}_{index}",
                 bot_token=b['token'],
                 api_id=Config.API_ID,
                 api_hash=Config.API_HASH,
-                in_memory=True,
+                workdir="sessions"
             )
             await sc.start()
             sc.is_initialized = True
