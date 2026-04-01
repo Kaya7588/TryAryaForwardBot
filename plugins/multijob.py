@@ -388,8 +388,71 @@ async def _run_multijob(job_id: str, user_id: int, bot=None):
         mj_last_prog_update = 0.0
         mj_start_time = time.time()
         mj_fwd_at_start = int(job.get("forwarded", 0))
-        # 
 
+        # \u2500\u2500 BOT DM BATCH (userbot + non-channel source) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        # get_messages(id_list) without a channel peer queries the GLOBAL inbox.
+        # Use get_chat_history (properly scoped) for DM/username sources instead.
+        def _mj_is_dm(fc):
+            if isinstance(fc, int): return fc >= 0
+            return True  # @username / "me"
+
+        if not is_bot and _mj_is_dm(from_chat):
+            logger.info(f"[MultiJob {job_id}] DM source \u2014 collecting via get_chat_history")
+            start_id_val = int(job.get("start_id") or 1)
+            dm_msgs = []
+            try:
+                async for m in client.get_chat_history(from_chat):
+                    if m.empty or m.service:
+                        continue
+                    if m.id < start_id_val:
+                        break
+                    if end_id > 0 and m.id > end_id:
+                        continue
+                    dm_msgs.append(m)
+            except Exception as e:
+                logger.warning(f"[MultiJob {job_id}] DM collect error: {e}")
+
+            dm_msgs.sort(key=lambda m: m.id)
+            logger.info(f"[MultiJob {job_id}] DM batch: {len(dm_msgs)} msgs to forward")
+
+            for msg in dm_msgs:
+                await pause_ev.wait()
+                fresh2 = await _mj_get(job_id)
+                if not fresh2 or fresh2.get("status") in ("stopped",):
+                    return
+                if not _passes_filters(msg, disabled_types):
+                    current = msg.id + 1
+                    await _mj_update(job_id, current_id=current)
+                    continue
+                _remove_links = 'links' in disabled_types
+                await _mj_forward(client, msg, to_chat, remove_caption, cap_tpl, forward_tag,
+                                   to_thread, to_chat_2, to_thread_2, replacements, _remove_links)
+                current = msg.id + 1
+                await _mj_update(job_id, current_id=current)
+                await _mj_inc(job_id, 1)
+                await asyncio.sleep(sleep_secs)
+
+            await _mj_update(job_id, status="done", current_id=current)
+            fj = await _mj_get(job_id)
+            _fwd = fj.get("forwarded", 0) if fj else len(dm_msgs)
+            if client and mj_prog_msg_id:
+                try:
+                    from pyrogram.enums import ParseMode
+                    await client.edit_message_text(to_chat, mj_prog_msg_id, _mj_prog_text(_fwd, mj_total, "done"), parse_mode=ParseMode.HTML)
+                    await client.unpin_chat_message(to_chat, mj_prog_msg_id)
+                except Exception: pass
+            if bot and fj:
+                try:
+                    await bot.send_message(user_id,
+                        f"<b>\u2705 Multi Job Complete!</b>\n\n"
+                        f"<b>Name:</b> {fj.get('name', job_id[-6:])}\n"
+                        f"<b>Source:</b> {fj.get('from_title','?')}\n"
+                        f"<b>Dest:</b> {fj.get('to_title','?')}\n"
+                        f"<b>Forwarded:</b> {_fwd} messages")
+                except Exception: pass
+            return
+
+        # \u2500\u2500 CHANNEL/GROUP: original ID-range loop \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 
         while True:
             # Pause check

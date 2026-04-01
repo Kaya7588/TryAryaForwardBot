@@ -425,7 +425,84 @@ async def _run_job(job_id: str, user_id: int):
             
             consecutive_empty = 0
 
-            while batch_cursor <= batch_end:
+            # ── BOT DM BATCH (userbot + non-channel source) ──────────────────────
+            # get_messages() without a channel peer queries the GLOBAL inbox (wrong).
+            # For DM/username sources we collect ALL messages via get_chat_history
+            # (which properly scopes to the specific conversation), sort chronologically,
+            # and forward them all in one go — then skip the while loop entirely.
+            def _is_dm_source(fc):
+                if isinstance(fc, int): return fc >= 0
+                return True  # @username, "me"
+
+            if not is_bot and _is_dm_source(from_chat):
+                logger.info(f"[Job {job_id}] DM batch: collecting via get_chat_history")
+                dm_all = []
+                batch_start_id = int(job.get('batch_start_id') or 1)
+                try:
+                    async for m in client.get_chat_history(from_chat):
+                        if m.empty or m.service:
+                            continue
+                        if m.id < batch_start_id:
+                            break  # gone past the start — stop
+                        if batch_end > 0 and m.id > batch_end:
+                            continue  # not yet in range
+                        dm_all.append(m)
+                except Exception as e:
+                    logger.warning(f"[Job {job_id}] DM history collect error: {e}")
+
+                dm_all.sort(key=lambda m: m.id)  # chronological order
+                logger.info(f"[Job {job_id}] DM batch: {len(dm_all)} messages to forward")
+
+                for msg in dm_all:
+                    fresh = await _get_job(job_id)
+                    if not fresh or fresh.get("status") != "running":
+                        return
+
+                    disabled_types = await db.get_filters(user_id)
+                    configs        = await db.get_configs(user_id)
+                    filters_dict   = configs.get('filters', {})
+                    remove_caption = filters_dict.get('rm_caption', False)
+                    remove_links   = 'links' in disabled_types
+                    cap_tpl        = configs.get('caption')
+                    forward_tag    = configs.get('forward_tag', False)
+                    sleep_secs     = max(1, int(configs.get('duration', 1) or 1))
+                    replacements   = configs.get('replacements', {})
+
+                    if not _passes_filters(msg, disabled_types):
+                        await _update_job(job_id, batch_cursor=msg.id + 1)
+                        continue
+                    if not _passes_size_limit(msg, max_size_mb, max_dur_secs):
+                        await _update_job(job_id, batch_cursor=msg.id + 1)
+                        continue
+                    try:
+                        await _forward_message(client, msg, to_chat, remove_caption, cap_tpl, forward_tag,
+                                               to_thread, to_chat_2, to_thread_2, replacements, remove_links)
+                        await _inc_forwarded(job_id, 1, forward_type='batch')
+                    except FloodWait as fw:
+                        await asyncio.sleep(fw.value + 1)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        logger.debug(f"[Job {job_id}] DM batch fwd error {msg.id}: {e}")
+
+                    await _update_job(job_id, batch_cursor=msg.id + 1)
+                    await asyncio.sleep(sleep_secs)
+
+                # DM batch done — mark complete and fall through to live phase
+                await _update_job(job_id, batch_done=True, batch_cursor=batch_end,
+                                  last_seen_id=max(last_seen, batch_end))
+                last_seen = max(last_seen, batch_end)
+                logger.info(f"[Job {job_id}] DM batch complete ({len(dm_all)} msgs).")
+                try:
+                    prog_id = (await _get_job(job_id)).get("prog_msg_id")
+                    if prog_id:
+                        await client.edit_message_text(to_chat, prog_id, "<b>✅ Forwarding Completed! All files have been successfully transferred.</b>")
+                except Exception:
+                    pass
+
+            else:
+            # ── CHANNEL/GROUP BATCH (original get_messages path) ─────────────────
+             while batch_cursor <= batch_end:
                 fresh = await _get_job(job_id)
                 if not fresh or fresh.get("status") != "running":
                     return
