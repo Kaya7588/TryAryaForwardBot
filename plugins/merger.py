@@ -259,6 +259,37 @@ def _build_info_text(job: dict, now_ts: Optional[float] = None) -> str:
 def _check_ffmpeg():
     return shutil.which("ffmpeg") is not None
 
+
+def _strip_ffmpeg_banner(stderr_text: str) -> str:
+    """Remove the FFmpeg version/configuration banner from stderr output.
+    The banner lines start with 'ffmpeg version', 'built with', 'configuration:',
+    or 'libXxx' version lines. Everything after those is the actual error.
+    On Windows the gyan.dev banner is ~800 chars — showing raw stderr[:300] to
+    the user only ever shows the banner, never the actual error.
+    """
+    lines = stderr_text.splitlines(keepends=True)
+    result = []
+    in_banner = True
+    for line in lines:
+        s = line.strip()
+        if in_banner:
+            # Standard FFmpeg banner patterns
+            if (s.startswith("ffmpeg version") or
+                    s.startswith("built with") or
+                    s.startswith("configuration:") or
+                    # lib version lines look like: "  libavutil      59. 39.100 / 59. 39.100"
+                    (s.startswith("lib") and "/" in s)):
+                continue
+            else:
+                in_banner = False
+                if s:  # skip blank separator line right after banner
+                    result.append(line)
+        else:
+            result.append(line)
+    stripped = "".join(result).strip()
+    # Fallback: if nothing left after stripping, return last 1500 chars as-is
+    return stripped if stripped else stderr_text[-1500:]
+
 def _parse_link(text):
     text = text.strip().rstrip('/')
     if text.isdigit(): return None, int(text)
@@ -345,39 +376,61 @@ async def _ffmpeg_merge(file_list, output_path, metadata=None, mtype="audio", co
     speed: 1.0 = normal, 2.5 = 2.5x faster.
     Returns (ok: bool, error: str).
     """
-    import asyncio, re
+    import asyncio, re, subprocess as _sp
+
     async def _run_cmd(cmd_list, timeout_sec):
-        proc = await asyncio.create_subprocess_exec(
-            *cmd_list, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        # Use a deque to keep only the LAST N chunks — FFmpeg prints its version
-        # banner first (which is useless noise) and the actual error at the END.
-        from collections import deque
-        stderr_tail = deque(maxlen=60)  # keep last 60 chunks ~ last ~240KB
-        async def _reader():
-            while True:
+        """Run an FFmpeg command and return (ok, error_message).
+        Uses subprocess.run via run_in_executor for 100% reliable output
+        capture on all platforms (especially Windows), with a separate
+        asyncio task for real-time progress tracking when progress_cb is set.
+        """
+        loop = asyncio.get_event_loop()
+
+        # ── Synchronous runner (captures ALL stdout+stderr reliably) ──────
+        def _sync_run():
+            try:
+                result = _sp.run(
+                    cmd_list,
+                    stdout=_sp.PIPE,
+                    stderr=_sp.PIPE,
+                    timeout=timeout_sec
+                )
+                return result.returncode, result.stderr.decode('utf-8', errors='replace')
+            except _sp.TimeoutExpired:
+                return -1, "FFmpeg timed out"
+            except FileNotFoundError:
+                return -1, "ffmpeg executable not found — please install FFmpeg and ensure it is in PATH"
+            except Exception as exc:
+                return -1, str(exc)
+
+        if progress_cb:
+            # Run FFmpeg in thread; simultaneously poll ffprobe every 3 s for progress
+            import time as _time
+            _start = _time.time()
+            fut = loop.run_in_executor(None, _sync_run)
+            while not fut.done():
+                await asyncio.sleep(3)
+                elapsed = _time.time() - _start
                 try:
-                    raw = await proc.stderr.read(4096)
+                    await progress_cb(elapsed)   # rough progress by wall-clock
                 except Exception:
-                    break
-                if not raw: break
-                lstr = raw.decode('utf-8', errors='replace')
-                stderr_tail.append(lstr)
-                if progress_cb:
-                    matches = re.findall(r'time=(\d+):(\d+):(\d+\.\d+)', lstr)
-                    if matches:
-                        h, m_m, s = float(matches[-1][0]), float(matches[-1][1]), float(matches[-1][2])
-                        await progress_cb(h*3600 + m_m*60 + s)
-        try:
-            await asyncio.wait_for(asyncio.gather(proc.wait(), _reader()), timeout=timeout_sec)
-        except asyncio.TimeoutError:
-            try: proc.kill()
-            except: pass
-            return False, "FFmpeg timed out"
-        outerr = "".join(stderr_tail)
-        if proc.returncode == 0: return True, ""
-        # Return only the last ~2000 chars so the real error is visible
-        return False, outerr[-2000:] if len(outerr) > 2000 else outerr
+                    pass
+            returncode, stderr_text = await fut
+        else:
+            returncode, stderr_text = await loop.run_in_executor(None, _sync_run)
+
+        if returncode == 0:
+            return True, ""
+        # Strip the verbose FFmpeg banner so the actual error is visible
+        meaningful = _strip_ffmpeg_banner(stderr_text)
+        # Log full command + error server-side for debugging
+        logger.error(
+            "[FFmpeg] Command failed (rc=%d):\n  %s\nError:\n%s",
+            returncode,
+            " ".join(str(x) for x in cmd_list),
+            meaningful[:2000]
+        )
+        return False, meaningful
 
     lst = output_path + ".list.txt"
     vconcat_txt = output_path + ".vconcat.txt"
@@ -939,13 +992,27 @@ async def _run_job(jid, uid, bot):
                     except: pass
                     last_edit[0] = now
 
+            # ── Pre-flight: verify every file exists and is non-empty ─────
+            bad = [(p, "missing" if not os.path.exists(p) else "empty")
+                   for p in chunk_files_sorted
+                   if not os.path.exists(p) or os.path.getsize(p) == 0]
+            if bad:
+                desc = "; ".join(f"{os.path.basename(p)} ({r})" for p, r in bad)
+                emsg = f"Pre-merge check failed — {len(bad)} file(s) not usable: {desc}"
+                logger.error("[MG %s] %s", jid, emsg)
+                await _db_up(jid, status="error", error=emsg)
+                await bot.send_message(uid, f"<b>❌ {emsg}</b>")
+                return
+
             # Chunk parts: apply speed chunk-by-chunk to save MASSIVE amounts of RAM
             ok, err = await _ffmpeg_merge(
                 chunk_files_sorted, part_path, None, mtype, None, speed, False, progress_cb=chunk_prog)
 
             if not ok:
-                await _db_up(jid, status="error", error=f"Chunk {chunk_num} merge failed: {err[:300]}")
-                await bot.send_message(uid, f"<b>❌ Chunk {chunk_num} merge failed:</b>\n<code>{err[:300]}</code>")
+                await _db_up(jid, status="error", error=f"Chunk {chunk_num} merge failed: {err[:400]}")
+                # Show up to 1200 chars so the actual error is readable (banner already stripped)
+                await bot.send_message(uid,
+                    f"<b>❌ Chunk {chunk_num} merge failed:</b>\n<code>{err[:1200]}</code>")
                 return
 
             part_files.append(part_path)
