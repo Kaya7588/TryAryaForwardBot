@@ -24,10 +24,13 @@ from database import db
 from plugins.test import CLIENT
 
 def _sc(text: str) -> str:
-    return text.translate(str.maketrans(
-        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
-        "𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭"
-    ))
+    """Convert text to Unicode small-caps style: ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀꜱᴛᴜᴠᴡxʏᴢ"""
+    _LOWER = "abcdefghijklmnopqrstuvwxyz"
+    _UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    # Small-caps equivalents for a–z (and A–Z maps to the same glyphs)
+    _SC    = "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀꜱᴛᴜᴠᴡxʏᴢ"
+    tbl = str.maketrans(_LOWER + _UPPER, _SC + _SC)
+    return text.translate(tbl)
 
 new_share_job = {}
 
