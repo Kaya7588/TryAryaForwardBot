@@ -217,10 +217,13 @@ async def _process_start(client, message):
     if not fsub_channels:
         fsub_channels = await db.get_share_fsub_channels()  # fallback global
 
-    if fsub_channels:
+    # Check if user already completed FSub for this bot
+    user_already_approved = await db.is_user_fsub_approved(bot_id, user_id) if bot_id else False
+
+    if fsub_channels and not user_already_approved:
         not_joined = await check_all_subscriptions(client, user_id, fsub_channels, bot_id)
         if not_joined:
-            f_buttons = []
+            f_buttons = []  # User needs to join more channels
             channel_num = 1
             for ch in not_joined:
                 invite  = ch.get('invite_link', '')
@@ -272,6 +275,10 @@ async def _process_start(client, message):
         await client.get_chat(source_chat)
     except Exception as peer_err:
         logger.warning(f"get_chat peer resolution failed: {peer_err}")
+
+    # Mark user as FSub approved for this bot (they've either passed check or had no FSub requirement)
+    if bot_id:
+        await db.save_user_fsub_approved(bot_id, user_id)
 
     # Send actual files
     sent_ids = []

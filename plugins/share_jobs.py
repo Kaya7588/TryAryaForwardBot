@@ -789,14 +789,14 @@ async def _build_share_links(bot, user_id, sj, info_msg):
                     elif 'a' <= c <= 'z': r += chr(0x1D5EE + ord(c) - ord('a'))
                     else: r += c
                 return r
-            txt = f"{_bold(story.upper())} {_bold('EPS')} {first_ep}–{last_ep}"
+            txt = f"{_sc(story.upper())} {_sc('EPS')} {first_ep}–{last_ep}"
             keyboard = []
             for j in range(0, len(chunk), 2):
                 row = [c["btn"] for c in chunk[j:j + 2]]
                 keyboard.append(row)
             keyboard.append([
-                InlineKeyboardButton(_sc("Tutorial") + " » ", url="https://t.me/StoriesLinkopningguide"),
-                InlineKeyboardButton(_sc("Support") + " » ", url="https://t.me/+EAc-6v1bmZ1iMDBl")
+                InlineKeyboardButton(_sc("tutorial") + " » ", url="https://t.me/StoriesLinkopningguide"),
+                InlineKeyboardButton(_sc("support") + " » ", url="https://t.me/AryaHelpTG")
             ])
             for attempt in range(6):
                 try:

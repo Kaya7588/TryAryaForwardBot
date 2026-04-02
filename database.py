@@ -154,6 +154,22 @@ class Database:
     async def set_bot_fsub_channels(self, bot_id: str, channels: list):
         await self._set_bot_cfg(bot_id, fsub_channels=channels)
 
+    # FSub approval tracking
+    async def save_user_fsub_approved(self, bot_id: str, user_id: int):
+        """Mark user as FSub-approved for this bot"""
+        await self.users.update_one(
+            {'user_id': user_id},
+            {'$addToSet': {'fsub_approved_bots': bot_id}},
+            upsert=True
+        )
+
+    async def is_user_fsub_approved(self, bot_id: str, user_id: int) -> bool:
+        """Check if user has been approved for FSub on this bot"""
+        result = await self.users.find_one(
+            {'user_id': user_id, 'fsub_approved_bots': bot_id}
+        )
+        return result is not None
+
     # Per-bot About section
     async def get_share_bot_about(self, bot_id: str) -> dict:
         return (await self._bot_cfg(bot_id)).get('about', {})
